@@ -9,6 +9,42 @@ Stack picks (most common in the Go ecosystem): **Gin** for HTTP, **GORM** for th
 
 ---
 
+## Layout (clean-arch / hexagonal style)
+
+```
+cmd/
+  api/main.go              # HTTP server entrypoint (Step 1)
+  worker/main.go           # Asynq worker entrypoint (Step 6)
+  seed/main.go             # Seed runner (Step 5)
+internal/
+  domain/                  # entities (innermost layer; no project-internal deps)
+  service/                 # use cases / application services
+  tasks/                   # shared task payload types + name constants
+                           # imported by both adapter/queue/ and adapter/worker/
+  config/                  # env loading
+  log/                     # slog facade (already implemented)
+  adapter/
+    http/
+      api/                 # gin engine assembly
+      router/              # path → handler binding
+      middleware/          # cross-cutting HTTP concerns
+      handler/             # HTTP controllers
+    repository/            # persistence adapters
+      postgres/            # GORM impl
+    queue/                 # asynq client (enqueuer)
+    worker/                # asynq server + task handlers
+```
+
+**Dependency rule:** `cmd → adapter → service → domain`. Domain imports nothing project-internal. `adapter/queue/` and `adapter/worker/` both depend on `internal/tasks/` for shared payload types — `tasks/` is a contract, not an adapter. `log/` and `config/` are cross-cutting and used by everyone.
+
+## Conventions in force
+- **Error responses** use snake_case codes: `{"error": "<code>"}` (e.g. `not_found`, `internal_error`). Set in `internal/adapter/http/middleware/{not_found,recovery}.go`; applies to all handlers.
+- **Request log path** records `c.Request.URL.Path` only — query strings are excluded so secrets accidentally passed via `?token=…` don't end up in logs.
+- **Logging** goes through `internal/log` only; nothing else imports `log/slog`. Source-line attribution preserved via a `runtime.Callers`-based wrapper. Tint provides colored TTY output (env-driven JSON handler is a Step 2 follow-up).
+- **Graceful shutdown** is implemented in `cmd/api/main.go` using `http.Server` + `signal.Notify` on SIGINT/SIGTERM with a 10s drain.
+
+---
+
 ## Step 0 — Project Init
 **Goal:** Empty Go module with a `.gitignore` and `README`.
 
@@ -27,32 +63,29 @@ go mod init github.com/dali/go_project_sample
 
 ---
 
-## Step 1 — Gin API with a Health Endpoint
-**Goal:** A Gin server you can `curl` returns 200 on `/health`. No DB, no worker — just prove the HTTP layer works.
+## Step 1 — Gin API + Logging + Middleware Scaffold ✅ DONE
+**Goal:** A Gin server you can `curl` returns 200 on `/health`, with structured logging, request logging middleware, panic recovery, custom 404, and graceful shutdown.
 
-**Install**
-```bash
-go get github.com/gin-gonic/gin
-```
-
-**Files**
-- `cmd/api/main.go`
-  - `func main()`: builds a `gin.Default()` engine, registers `GET /health` → `c.JSON(200, gin.H{"status":"ok"})`, calls `r.Run(":8080")`.
-- `internal/router/router.go`
-  - `func New() *gin.Engine`: returns the configured engine. Keeps `main.go` thin.
-- `internal/handlers/health.go`
-  - `func Health(c *gin.Context)`: the handler.
+**Implemented:**
+- `cmd/api/main.go` — graceful shutdown via `http.Server` + `signal.Notify` (10s drain). `startServer` and `notifyShutdown` helpers return channels; `main` selects on them. Gin global writers redirected to `log.Writer(...)`.
+- `internal/log/log.go` — slog wrapper with tint colored output. `Debug/Info/Warn/Error/Fatal/Writer`. Source-line attribution via `runtime.Callers`-based `logAt` helper. `AddSource: true`. Re-exports `Level`/`LevelDebug` etc. so callers don't import `log/slog`.
+- `internal/adapter/http/api/api.go` — `New() *gin.Engine` wires middleware + routes.
+- `internal/adapter/http/router/router.go` — `Register(engine)` — route binding only.
+- `internal/adapter/http/handler/health.go` — `Health` handler.
+- `internal/adapter/http/middleware/{request_logger,recovery,not_found}.go` — status-aware request logger, JSON-returning panic recovery, JSON 404.
 
 **Verify**
 ```bash
 go run ./cmd/api
-curl -s localhost:8080/health   # → {"status":"ok"}
+curl -s localhost:8080/health    # → {"status":"ok"}
+curl -s localhost:8080/missing   # → {"error":"not_found"}
+# Ctrl-C — should see "shutdown signal received, draining" then "server stopped"
 ```
 
 ---
 
 ## Step 2 — Config Loading from `.env`
-**Goal:** Centralized config so later steps can pull DB/Redis settings from one place.
+**Goal:** Centralized config so later steps can pull DB/Redis settings from one place. Also moves `port` and `shutdownTimeout` out of `cmd/api/main.go` constants and into env-driven config.
 
 **Install**
 ```bash
@@ -60,22 +93,24 @@ go get github.com/joho/godotenv
 ```
 
 **Files**
-- `.env.example` — placeholders for `HTTP_PORT`, `DB_*`, `REDIS_ADDR` (see Step 3 / Step 5 for values).
+- `.env.example` — placeholders for `APP_ENV`, `HTTP_PORT`, `HTTP_SHUTDOWN_TIMEOUT`, `LOG_FORMAT`, `DB_*`, `REDIS_ADDR`.
 - `.env` — copy of `.env.example`, gitignored.
 - `internal/config/config.go`
-  - `type Config struct { HTTPPort, DBHost, DBPort, DBUser, DBPassword, DBName, DBSSLMode, RedisAddr, RedisPassword string }`
-  - `func Load() *Config`: calls `godotenv.Load()` (ignore `os.IsNotExist` error so prod is fine without a file), reads each var via `os.Getenv` with defaults.
-  - `func (c *Config) DatabaseDSN() string` — builds the postgres DSN string.
-  - `func (c *Config) RedisOpt() asynq.RedisClientOpt` — *add this method in Step 5* once asynq is imported.
+  - `type Config struct { AppEnv, HTTPPort, LogFormat, DBHost, DBPort, DBUser, DBPassword, DBName, DBSSLMode, RedisAddr, RedisPassword string; HTTPShutdownTimeout time.Duration }`
+  - `func Load() *Config`: calls `godotenv.Load()` (ignore not-found so prod is fine without a file), reads each var via `os.Getenv` with sensible defaults.
+  - `func (c *Config) DatabaseDSN() string` — postgres DSN.
+  - `func (c *Config) RedisOpt() asynq.RedisClientOpt` — *add this method in Step 6* once asynq is imported.
 
-**Wire it in:** `cmd/api/main.go` calls `config.Load()` at the top and uses `cfg.HTTPPort`.
+**Wire it in**
+- `cmd/api/main.go`: call `config.Load()` first, use `cfg.HTTPPort` and `cfg.HTTPShutdownTimeout`, drop the local `port` / `shutdownTimeout` consts.
+- `internal/log/log.go`: add a `Setup(cfg *config.Config)` (or `Setup(format string)`) that switches between `tint.NewHandler` (dev) and `slog.NewJSONHandler` (prod) based on `cfg.LogFormat` / `cfg.AppEnv`. `main` calls `log.Setup(cfg)` before any other code logs. Move the `init()`-time tint setup into `Setup`.
 
-**Verify:** Set `HTTP_PORT=9090` in `.env`, restart, server now binds 9090.
+**Verify:** Set `HTTP_PORT=9090` in `.env`, restart, server now binds 9090. Set `LOG_FORMAT=json` and confirm JSON log output.
 
 ---
 
 ## Step 3 — Postgres + GORM
-**Goal:** API can talk to Postgres. Add a `User` model and a `GET /users` endpoint that returns rows from the database (initially empty).
+**Goal:** API can talk to Postgres. Add a `User` entity and a `GET /users` endpoint that returns rows from the database (initially empty). This is the first step that exercises the full layer stack: handler → service → repository → db.
 
 **Install**
 ```bash
@@ -92,17 +127,23 @@ docker run -d --name pg -p 5432:5432 \
 ```
 
 **Files**
-- `internal/db/db.go`
-  - `func New(cfg *config.Config) (*gorm.DB, error)`: `gorm.Open(postgres.Open(cfg.DatabaseDSN()), &gorm.Config{})`, ping the underlying `*sql.DB`, set pool limits (`SetMaxOpenConns(25)`, `SetMaxIdleConns(5)`, `SetConnMaxLifetime(5*time.Minute)`).
-- `internal/models/user.go`
-  - `type User struct { ID uuid.UUID; Email, Name string; CreatedAt, UpdatedAt time.Time }` with GORM tags.
-- `internal/handlers/users.go`
-  - `type UsersHandler struct { db *gorm.DB }`
-  - `func (h *UsersHandler) List(c *gin.Context)` — `db.Limit(100).Find(&users)`.
-  - `func (h *UsersHandler) Get(c *gin.Context)` — fetch by `:id`, 404 if not found.
-  - `func (h *UsersHandler) Create(c *gin.Context)` — bind `{email, name}`, insert, return 201. (No enqueue yet — added in Step 6.)
-- `internal/router/router.go` — accept `*gorm.DB`, register `/users` routes.
-- `cmd/api/main.go` — call `db.New(cfg)`, pass to `router.New(db)`.
+- `internal/domain/user.go`
+  - `type User struct { ID uuid.UUID; Email, Name string; CreatedAt, UpdatedAt time.Time }` with GORM tags + JSON tags. (Pragmatic: one struct serves domain + persistence model. Re-evaluate if domain grows complex.)
+- `internal/service/user.go`
+  - `type UserRepository interface { List(ctx) ([]domain.User, error); Get(ctx, id) (*domain.User, error); Create(ctx, *domain.User) error }` — interface owned by the service layer (dependency inversion).
+  - `type UserService struct { repo UserRepository }`
+  - `func NewUserService(repo UserRepository) *UserService`
+  - Methods: `List`, `Get`, `Create`.
+- `internal/adapter/repository/postgres/db.go`
+  - `func New(cfg *config.Config) (*gorm.DB, error)`: GORM open, ping `*sql.DB`, set pool limits (`SetMaxOpenConns(25)`, `SetMaxIdleConns(5)`, `SetConnMaxLifetime(5*time.Minute)`).
+- `internal/adapter/repository/postgres/user_repository.go`
+  - `type UserRepository struct { db *gorm.DB }` — implements `service.UserRepository`.
+- `internal/adapter/http/handler/users.go`
+  - `type UsersHandler struct { svc *service.UserService }`
+  - `List`, `Get`, `Create` methods (Create is bind+validate JSON, no enqueue yet — added in Step 6).
+- Update `internal/adapter/http/router/router.go` — accept a `Handlers` struct (or similar dependency container), register `/users` routes.
+- Update `internal/adapter/http/api/api.go` — accept dependencies, pass to `router.Register`.
+- `cmd/api/main.go` — wire: `cfg → db → repo → svc → handlers → api.New(handlers)`.
 
 **Note:** Don't use `db.AutoMigrate` — schema authority belongs to migrations (Step 4).
 
@@ -168,7 +209,7 @@ curl -s localhost:8080/users   # → [] (table is back)
 - `cmd/seed/main.go`
   - Loads config + db, then:
     ```go
-    users := []models.User{
+    users := []domain.User{
         {Email: "alice@example.com", Name: "Alice"},
         {Email: "bob@example.com",   Name: "Bob"},
         {Email: "carol@example.com", Name: "Carol"},
@@ -202,24 +243,24 @@ docker run -d --name redis -p 6379:6379 redis:7-alpine
 
 **Files**
 - Update `internal/config/config.go` — add `RedisOpt() asynq.RedisClientOpt` returning `asynq.RedisClientOpt{Addr: c.RedisAddr, Password: c.RedisPassword}`.
-- `internal/tasks/tasks.go`
-  - `const TypeWelcomeEmail = "email:welcome"`
-- `internal/tasks/email.go`
+- `internal/tasks/tasks.go` — task name constants. `const TypeWelcomeEmail = "email:welcome"`.
+- `internal/tasks/email.go` — payload types only (no asynq logic).
   - `type WelcomeEmailPayload struct { UserID uuid.UUID }`
-  - `func NewWelcomeEmailTask(userID uuid.UUID) (*asynq.Task, error)` — JSON-marshals payload, returns `asynq.NewTask(TypeWelcomeEmail, data)`.
-  - `type EmailHandler struct { db *gorm.DB }`
-  - `func (h *EmailHandler) HandleWelcomeEmail(ctx context.Context, t *asynq.Task) error` — unmarshal payload, look up user, log `"sending welcome email to <email>"`. Return non-nil error to trigger asynq's retry.
-- `internal/queue/client.go`
+  - `func NewWelcomeEmailTask(userID uuid.UUID) (*asynq.Task, error)` — JSON-marshals payload, returns `asynq.NewTask(TypeWelcomeEmail, data)`. (This *does* import asynq, but the type itself is the contract.)
+- `internal/adapter/queue/client.go`
   - `type Client struct { c *asynq.Client }`
   - `func NewClient(opt asynq.RedisClientOpt) *Client`
-  - `func (c *Client) EnqueueWelcomeEmail(ctx context.Context, userID uuid.UUID) error`
+  - `func (c *Client) EnqueueWelcomeEmail(ctx context.Context, userID uuid.UUID) error` — uses `tasks.NewWelcomeEmailTask`.
   - `func (c *Client) Close() error`
+- `internal/adapter/worker/email.go`
+  - `type EmailHandler struct { db *gorm.DB }`
+  - `func (h *EmailHandler) HandleWelcomeEmail(ctx context.Context, t *asynq.Task) error` — unmarshal `tasks.WelcomeEmailPayload`, look up user, log `"sending welcome email to <email>"`. Return non-nil error to trigger asynq's retry.
 - `cmd/worker/main.go`
-  - Loads config + db, builds `asynq.NewServer(cfg.RedisOpt(), asynq.Config{Concurrency: 10, Queues: map[string]int{"default": 1}})`.
-  - `mux := asynq.NewServeMux(); mux.HandleFunc(tasks.TypeWelcomeEmail, (&tasks.EmailHandler{DB: db}).HandleWelcomeEmail)`
+  - `config.Load()` → `log.Setup(cfg)` → `db.New(cfg)` → build `asynq.NewServer(cfg.RedisOpt(), asynq.Config{Concurrency: 10, Queues: map[string]int{"default": 1}})`.
+  - `mux := asynq.NewServeMux(); mux.HandleFunc(tasks.TypeWelcomeEmail, (&worker.EmailHandler{DB: db}).HandleWelcomeEmail)`
   - `srv.Run(mux)` — asynq handles SIGINT/SIGTERM itself.
-- Update `internal/handlers/users.go` — `Create` calls `h.queue.EnqueueWelcomeEmail(c, user.ID)` after the DB insert. **Log and continue on enqueue failure** — don't fail the request, the user is already saved (comment why).
-- Update `internal/router/router.go` and `cmd/api/main.go` — pass `*queue.Client` through.
+- Update `internal/service/user.go` — `Create` calls `queue.EnqueueWelcomeEmail(ctx, user.ID)` after the DB insert. **Log and continue on enqueue failure** — don't fail the request, the user is already saved (comment why).
+- Update `internal/adapter/http/api/api.go`, `internal/adapter/http/router/router.go`, `cmd/api/main.go` — pass `*queue.Client` through the dependency chain.
 
 **Verify**
 ```bash
@@ -265,7 +306,7 @@ go run ./cmd/api                  # still works against compose-managed pg
 **Files**
 - `Dockerfile` (multi-stage, multi-target)
   ```dockerfile
-  FROM golang:1.23-alpine AS build
+  FROM golang:1.25-alpine AS build
   WORKDIR /src
   COPY go.mod go.sum ./
   RUN go mod download
@@ -361,5 +402,4 @@ make down                     # tear down (keep volumes); add `-v` to nuke data
 - Real SMTP for the welcome email — handler currently just logs
 - Tests (`_test.go`) — testify + dockertest is the usual combo
 - CI config
-- Structured request-logging middleware beyond Gin's default
-- Graceful shutdown beyond Gin's defaults / asynq's built-in signal handling
+- Linting (`.golangci.yml`)
