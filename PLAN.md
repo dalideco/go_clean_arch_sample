@@ -14,6 +14,7 @@ Stack picks (most common in the Go ecosystem): **Gin** for HTTP, **GORM** for th
 ```
 cmd/
   api/main.go              # HTTP server entrypoint (Step 1)
+  cli/main.go              # Operator CLI for ad-hoc / admin tasks (Step 2.5)
   worker/main.go           # Asynq worker entrypoint (Step 6)
   seed/main.go             # Seed runner (Step 5)
 internal/
@@ -101,6 +102,26 @@ curl -s localhost:8080/missing   # → {"error":"not_found"}
 - `go run ./cmd/api` (dev default): tint colored output, port 8080, `[GIN-debug]` chatter present, `/health` → 200.
 - `APP_ENV=prod go run ./cmd/api`: JSON log output with source attribution; no `[GIN-debug]` chatter; no debug-mode warning.
 - `APP_ENV=prdo go run ./cmd/api`: exits with `invalid APP_ENV: "prdo" (want dev|prod|test)`.
+
+---
+
+## Step 2.5 — mise Toolchain + `cmd/cli` Scaffold ✅ DONE
+**Goal:** Get the project to "clone → `mise install` → ready" and put the operator CLI binary in place so future ops actions slot into an existing scaffold instead of building one each time.
+
+**Implemented:**
+- `mise.toml` (repo root) — pins `go = "1.25.0"`; installs `dlv` via mise's `go:` backend (`"go:github.com/go-delve/delve/cmd/dlv" = "latest"`) so `mise install` is the one-and-only setup step; auto-loads `.env` into the shell via `[env] _.file = ".env"`; tasks: `server` (`go run ./cmd/api`), `console` (`dlv debug ./cmd/api`), `cli` (`go run ./cmd/cli`).
+- `cmd/cli/main.go` — Cobra root command, no subcommands yet. Heavy package doc comment explaining the rationale (Go has no `iex --remsh`; ops actions are CLI subcommands that wrap `internal/service/...` functions), what NOT to use this binary for, and how to add a subcommand. Future command files (`cmd/cli/requests.go`, etc.) will be lean — rationale lives once in `main.go`.
+- `go.mod` — added `github.com/spf13/cobra` (de-facto Go CLI library; stdlib `flag` is fine for one command, painful at five).
+- **godotenv stays.** mise auto-loads `.env` into interactive shells; `godotenv.Load()` in `config.go` handles compiled-binary, CI, and prod cases where mise isn't managing the shell.
+
+**Convention:** every ad-hoc operation an operator might run (list/retry/cancel a job, update a row in a controlled way, etc.) lands as a subcommand under `cmd/cli/`, each wrapping an `internal/service/...` function so the same domain logic backs both HTTP handlers and CLI invocations.
+
+**Verify** — confirmed working:
+- `mise install` — installs Go 1.25.0 if missing.
+- `mise tasks` — lists `cli`, `console`, `server`.
+- `mise env` — shows `APP_ENV=dev`, `HTTP_PORT=8080` loaded from `.env`.
+- `mise run cli -- --help` — prints Cobra's root help.
+- `go build ./...` — both `cmd/api` and `cmd/cli` compile cleanly.
 
 ---
 

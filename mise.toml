@@ -1,0 +1,18 @@
+[tools]
+go = "1.25.0"
+"go:github.com/go-delve/delve/cmd/dlv" = "latest"
+
+[env]
+_.file = ".env"
+
+[tasks.server]
+description = "Run the API server"
+run = "go run ./cmd/api"
+
+[tasks.console]
+description = "Run the API server under Delve (interactive debugger)"
+run = "dlv debug ./cmd/api"
+
+[tasks.cli]
+description = "Run the operator CLI (pass subcommand args after --)"
+run = "go run ./cmd/cli"
