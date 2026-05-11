@@ -22,12 +22,43 @@ const (
 )
 
 func init() {
-	h := tint.NewHandler(os.Stderr, &tint.Options{
-		AddSource:  true,
-		Level:      LevelDebug,
-		TimeFormat: time.Kitchen,
-	})
+	Setup("tint", "debug")
+}
+
+// Setup installs the slog handler matching the given format ("tint" | "json")
+// and level ("debug" | "info" | "warn" | "error"). Unknown values fall back to
+// tint and info respectively. Called from main after config.Load(); the init
+// above provides sane pre-Setup defaults.
+func Setup(format, level string) {
+	lvl := parseLevel(level)
+	var h slog.Handler
+	switch format {
+	case "json":
+		h = slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+			AddSource: true,
+			Level:     lvl,
+		})
+	default:
+		h = tint.NewHandler(os.Stderr, &tint.Options{
+			AddSource:  true,
+			Level:      lvl,
+			TimeFormat: time.Kitchen,
+		})
+	}
 	slog.SetDefault(slog.New(h))
+}
+
+func parseLevel(s string) slog.Level {
+	switch s {
+	case "debug":
+		return LevelDebug
+	case "warn":
+		return LevelWarn
+	case "error":
+		return LevelError
+	default:
+		return LevelInfo
+	}
 }
 
 func Debug(msg string, args ...any) { logAt(2, slog.LevelDebug, msg, args...) }

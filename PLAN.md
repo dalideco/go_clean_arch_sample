@@ -84,28 +84,23 @@ curl -s localhost:8080/missing   # → {"error":"not_found"}
 
 ---
 
-## Step 2 — Config Loading from `.env`
-**Goal:** Centralized config so later steps can pull DB/Redis settings from one place. Also moves `port` and `shutdownTimeout` out of `cmd/api/main.go` constants and into env-driven config.
+## Step 2 — Config Loading from `.env` ✅ DONE
+**Goal:** Centralized, env-aware config. Three profiles (dev / prod / test) with prod-safe defaults in `baseConfig()`; each profile overrides only what differs. Moves `port` and `shutdownTimeout` out of `cmd/api/main.go` constants. Switches gin into release mode for prod (silences `[GIN-debug]` chatter and the debug-mode warning). Wires log format/level through env vars.
 
-**Install**
-```bash
-go get github.com/joho/godotenv
-```
+**Implemented:**
+- `internal/config/config.go` — `Env` int-iota enum (`EnvDev`/`EnvProd`/`EnvTest`) with `String()` and `parseEnv` (invalid `APP_ENV` fails loudly via `log.Fatal`). `Config` struct, `Load()` dispatcher, `baseConfig()` with prod-safe defaults, `IsProd()`. Single helper: `getenv`. *(`mustGetenv` will be added with Step 3 when `DB_HOST` requires it.)*
+- `internal/config/dev.go` — hardcoded for dev: tint format, debug level, 10s drain.
+- `internal/config/prod.go` — calls `gin.SetMode(gin.ReleaseMode)`, sets `Env=EnvProd`. Base (json/info/30s) is already prod-safe.
+- `internal/config/test.go` — 5s drain, warn level. Random port via `HTTP_PORT=0`. Stub for when tests land.
+- **Env-var policy:** only things that vary at deploy time (or are secrets) come from env. `HTTP_PORT` is env-driven; `HTTP_SHUTDOWN_TIMEOUT`, `LOG_FORMAT`, `LOG_LEVEL` are hardcoded in the per-profile files because they're decided per environment, not per deployment.
+- `.env.example` — committed; just `APP_ENV` and `HTTP_PORT`. (DB/Redis vars get appended in Steps 3 / 6.)
+- `internal/log/log.go` — `init()` calls `Setup("tint", "debug")` for pre-Setup defaults; `Setup(format, level)` switches handler (`json` → `slog.NewJSONHandler`, anything else → `tint`). `parseLevel` maps strings to slog levels.
+- `cmd/api/main.go` — `cfg := config.Load()` then `log.Setup(cfg.LogFormat, cfg.LogLevel)` first. Uses `cfg.HTTPPort` and `cfg.HTTPShutdownTimeout`.
 
-**Files**
-- `.env.example` — placeholders for `APP_ENV`, `HTTP_PORT`, `HTTP_SHUTDOWN_TIMEOUT`, `LOG_FORMAT`, `DB_*`, `REDIS_ADDR`.
-- `.env` — copy of `.env.example`, gitignored.
-- `internal/config/config.go`
-  - `type Config struct { AppEnv, HTTPPort, LogFormat, DBHost, DBPort, DBUser, DBPassword, DBName, DBSSLMode, RedisAddr, RedisPassword string; HTTPShutdownTimeout time.Duration }`
-  - `func Load() *Config`: calls `godotenv.Load()` (ignore not-found so prod is fine without a file), reads each var via `os.Getenv` with sensible defaults.
-  - `func (c *Config) DatabaseDSN() string` — postgres DSN.
-  - `func (c *Config) RedisOpt() asynq.RedisClientOpt` — *add this method in Step 6* once asynq is imported.
-
-**Wire it in**
-- `cmd/api/main.go`: call `config.Load()` first, use `cfg.HTTPPort` and `cfg.HTTPShutdownTimeout`, drop the local `port` / `shutdownTimeout` consts.
-- `internal/log/log.go`: add a `Setup(cfg *config.Config)` (or `Setup(format string)`) that switches between `tint.NewHandler` (dev) and `slog.NewJSONHandler` (prod) based on `cfg.LogFormat` / `cfg.AppEnv`. `main` calls `log.Setup(cfg)` before any other code logs. Move the `init()`-time tint setup into `Setup`.
-
-**Verify:** Set `HTTP_PORT=9090` in `.env`, restart, server now binds 9090. Set `LOG_FORMAT=json` and confirm JSON log output.
+**Verify** — confirmed working:
+- `go run ./cmd/api` (dev default): tint colored output, port 8080, `[GIN-debug]` chatter present, `/health` → 200.
+- `APP_ENV=prod go run ./cmd/api`: JSON log output with source attribution; no `[GIN-debug]` chatter; no debug-mode warning.
+- `APP_ENV=prdo go run ./cmd/api`: exits with `invalid APP_ENV: "prdo" (want dev|prod|test)`.
 
 ---
 

@@ -7,25 +7,23 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/dali/go_project_sample/internal/adapter/http/api"
+	"github.com/dali/go_project_sample/internal/config"
 	"github.com/dali/go_project_sample/internal/log"
 )
 
-const (
-	port            = "8080"
-	shutdownTimeout = 10 * time.Second
-)
-
 func main() {
+	cfg := config.Load()
+	log.Setup(cfg.LogFormat, cfg.LogLevel)
+
 	gin.DefaultWriter = log.Writer(log.LevelInfo)
 	gin.DefaultErrorWriter = log.Writer(log.LevelError)
 
 	srv := &http.Server{
-		Addr:    ":" + port,
+		Addr:    ":" + cfg.HTTPPort,
 		Handler: api.New(),
 	}
 
@@ -40,7 +38,7 @@ func main() {
 		log.Info("shutdown signal received, draining", "signal", sig.String())
 	}
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.HTTPShutdownTimeout)
 	defer cancel()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
