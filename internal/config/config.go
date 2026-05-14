@@ -51,6 +51,24 @@ type Config struct {
 
 	LogFormat string
 	LogLevel  string
+
+	DBHost     string
+	DBPort     string
+	DBUser     string
+	DBPassword string
+	DBName     string
+	DBSSLMode  string
+
+	DBMaxOpenConns    int
+	DBMaxIdleConns    int
+	DBConnMaxLifetime time.Duration
+}
+
+func (c *Config) DatabaseDSN() string {
+	return fmt.Sprintf(
+		"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
+		c.DBHost, c.DBPort, c.DBUser, c.DBPassword, c.DBName, c.DBSSLMode,
+	)
 }
 
 func Load() *Config {
@@ -77,6 +95,17 @@ func baseConfig() *Config {
 		HTTPShutdownTimeout: 30 * time.Second,
 		LogFormat:           "json",
 		LogLevel:            "info",
+
+		DBHost:     mustGetenv("DB_HOST"),
+		DBPort:     getenv("DB_PORT", "5432"),
+		DBUser:     mustGetenv("DB_USER"),
+		DBPassword: mustGetenv("DB_PASSWORD"),
+		DBName:     mustGetenv("DB_NAME"),
+		DBSSLMode:  getenv("DB_SSL_MODE", "require"),
+
+		DBMaxOpenConns:    25,
+		DBMaxIdleConns:    5,
+		DBConnMaxLifetime: 5 * time.Minute,
 	}
 }
 
@@ -87,5 +116,13 @@ func getenv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func mustGetenv(key string) string {
+	v, ok := os.LookupEnv(key)
+	if !ok || v == "" {
+		log.Fatal("required env var not set", "key", key)
+	}
+	return v
 }
 

@@ -9,8 +9,10 @@ import (
 	"syscall"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"github.com/dali/go_project_sample/internal/adapter/http/api"
+	"github.com/dali/go_project_sample/internal/adapter/repository/postgres"
 	"github.com/dali/go_project_sample/internal/config"
 	"github.com/dali/go_project_sample/internal/log"
 )
@@ -19,12 +21,15 @@ func main() {
 	cfg := config.Load()
 	log.Setup(cfg.LogFormat, cfg.LogLevel)
 
+	db := startDbConnection(cfg)
+	defer closeDB(db)
+
 	gin.DefaultWriter = log.Writer(log.LevelInfo)
 	gin.DefaultErrorWriter = log.Writer(log.LevelError)
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.HTTPPort,
-		Handler: api.New(),
+		Handler: api.New(db),
 	}
 
 	serverErr := startServer(srv)
@@ -46,6 +51,21 @@ func main() {
 		return
 	}
 	log.Info("server stopped")
+}
+
+func startDbConnection(cfg *config.Config) *gorm.DB {
+	db, err := postgres.New(cfg)
+	if err != nil {
+		log.Fatal("db connect failed", "err", err)
+	}
+	log.Info("db connected", "host", cfg.DBHost, "name", cfg.DBName)
+	return db
+}
+
+func closeDB(db *gorm.DB) {
+	if sqlDB, err := db.DB(); err == nil {
+		_ = sqlDB.Close()
+	}
 }
 
 func startServer(srv *http.Server) <-chan error {

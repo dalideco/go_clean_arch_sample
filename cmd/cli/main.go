@@ -43,6 +43,9 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+
+	"github.com/dali/go_project_sample/internal/config"
+	"github.com/dali/go_project_sample/internal/log"
 )
 
 var rootCmd = &cobra.Command{
@@ -56,6 +59,17 @@ package doc comment in cmd/cli/main.go for the full rationale.`,
 }
 
 func main() {
+	cfg := config.Load()
+	log.Setup(cfg.LogFormat, cfg.LogLevel)
+
+	// Dev-only commands. Destructive or local-bring-up operations must not
+	// be reachable in prod/test envs — gate them here so they don't even
+	// appear in `cli --help` outside dev.
+	if cfg.Env == config.EnvDev {
+		rootCmd.AddCommand(newDBSetupCmd(cfg))
+		rootCmd.AddCommand(newDBResetCmd(cfg))
+	}
+
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
