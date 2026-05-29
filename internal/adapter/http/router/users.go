@@ -12,8 +12,8 @@ import (
 // of use case → handler so that main.go does not grow per feature. The
 // repository comes pre-built in the bundle, so this file is ORM-agnostic.
 func RegisterUsers(r gin.IRouter, repos usecase.Repositories) {
-	svc := usecase.NewUserUseCase(repos.Users)
-	h := handler.NewUsersHandler(svc)
+	uc := usecase.NewUserUseCase(repos.Users)
+	h := handler.NewUsersHandler(uc)
 
 	r.GET("/users", h.List)
 	r.GET("/users/:id", h.Get)

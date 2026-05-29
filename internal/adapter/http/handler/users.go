@@ -26,11 +26,11 @@ type userUseCase interface {
 }
 
 type UsersHandler struct {
-	svc userUseCase
+	uc userUseCase
 }
 
-func NewUsersHandler(svc userUseCase) *UsersHandler {
-	return &UsersHandler{svc: svc}
+func NewUsersHandler(uc userUseCase) *UsersHandler {
+	return &UsersHandler{uc: uc}
 }
 
 type createUserRequest struct {
@@ -57,7 +57,7 @@ func toResponse(u domain.User) userResponse {
 }
 
 func (h *UsersHandler) List(c *gin.Context) {
-	users, err := h.svc.List(c.Request.Context())
+	users, err := h.uc.List(c.Request.Context())
 	if err != nil {
 		log.Error("users: list failed", "err", err)
 		c.JSON(http.StatusInternalServerError, httperr.Response{Error: "internal_error"})
@@ -76,7 +76,7 @@ func (h *UsersHandler) Get(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, httperr.Response{Error: "invalid_id"})
 		return
 	}
-	u, err := h.svc.Get(c.Request.Context(), id)
+	u, err := h.uc.Get(c.Request.Context(), id)
 	if err != nil {
 		if errors.Is(err, usecase.ErrUserNotFound) {
 			c.JSON(http.StatusNotFound, httperr.Response{Error: "not_found"})
@@ -95,7 +95,7 @@ func (h *UsersHandler) Create(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, httperr.Response{Error: "invalid_body"})
 		return
 	}
-	u, err := h.svc.Create(c.Request.Context(), req.Email, req.Name)
+	u, err := h.uc.Create(c.Request.Context(), req.Email, req.Name)
 	if err != nil {
 		if errors.Is(err, usecase.ErrUserEmailTaken) {
 			c.JSON(http.StatusConflict, httperr.Response{Error: "email_taken"})

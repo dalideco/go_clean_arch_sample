@@ -25,6 +25,9 @@ Strict dependency direction: `domain` ← `usecase` ← `adapter` ← `cmd`. Inn
 - **Declares repository interfaces** that the use case depends on (consumer-side dependency inversion). Example: `usecase.UserRepository` is declared in `internal/usecase/user.go`; the postgres package implements it.
 - **Owns domain error sentinels** (e.g. `usecase.ErrUserNotFound`). Adapters convert infrastructure errors to these at the boundary.
 - Business logic lives here, in `XxxUseCase` types. App-generated UUIDs (`uuid.New()`) happen here, not in the DB.
+- **Repositories are injected explicitly, never as a bundle.** A use case takes the *specific* repository interfaces it needs as named constructor params (`NewUserUseCase(users UserRepository, bankCreds BankCredentialRepository)`). **Never inject `usecase.Repositories` into a use case** — that bundle is a wiring-time aggregate (composition-root convenience) only; injecting it is a service locator that hides real dependencies and breaks testability. Multi-entity use cases just take more params; the per-feature `RegisterX` wires them, so `main.go` never changes.
+- A use case is an *operation*, not an *actor*: "the user does it" doesn't force one `UserUseCase` to own everything user-related — split into another `XxxUseCase` when a type gets unwieldy. Whether a sub-entity needs its own repository is a modeling call (independent lifecycle / separate table / security boundary → own repo; otherwise persist it as part of the owning aggregate's repo).
+- Atomic writes spanning repositories are a transaction (Unit of Work) concern — deferred; the pattern is a `WithTx(ctx, func(...) error)` callback at the adapter boundary, **not** a shared mutable bundle.
 
 ### `internal/adapter/repository/postgres/`
 - The **only** package allowed to import `gorm.io/...`. `*gorm.DB` must not leak out of this package — not in function signatures, not in return types, not in struct fields visible outside.
