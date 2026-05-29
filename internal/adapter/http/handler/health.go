@@ -1,15 +1,11 @@
 package handler
 
 import (
-	"net/http"
-
 	"github.com/gin-gonic/gin"
+
+	"github.com/dali/go_project_sample/internal/adapter/http/response"
 )
 
-type healthResponse struct {
-	Status string `json:"status"`
-}
-
 func Health(c *gin.Context) {
-	c.JSON(http.StatusOK, healthResponse{Status: "ok"})
+	response.OK(c, "status", "ok")
 }

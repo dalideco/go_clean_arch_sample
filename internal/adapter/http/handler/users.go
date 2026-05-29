@@ -9,7 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
-	"github.com/dali/go_project_sample/internal/adapter/http/httperr"
+	"github.com/dali/go_project_sample/internal/adapter/http/response"
 	"github.com/dali/go_project_sample/internal/domain"
 	"github.com/dali/go_project_sample/internal/log"
 	"github.com/dali/go_project_sample/internal/usecase"
@@ -60,50 +60,56 @@ func (h *UsersHandler) List(c *gin.Context) {
 	users, err := h.uc.List(c.Request.Context())
 	if err != nil {
 		log.Error("users: list failed", "err", err)
-		c.JSON(http.StatusInternalServerError, httperr.Response{Error: "internal_error"})
+		response.Error(c, http.StatusInternalServerError, "internal_error")
 		return
 	}
 	out := make([]userResponse, len(users))
 	for i, u := range users {
 		out[i] = toResponse(u)
 	}
-	c.JSON(http.StatusOK, out)
+	response.OK(c, "users", out)
 }
 
 func (h *UsersHandler) Get(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, httperr.Response{Error: "invalid_id"})
+		response.Error(c, http.StatusBadRequest, "invalid_id")
 		return
 	}
 	u, err := h.uc.Get(c.Request.Context(), id)
 	if err != nil {
 		if errors.Is(err, usecase.ErrUserNotFound) {
-			c.JSON(http.StatusNotFound, httperr.Response{Error: "not_found"})
+			response.Error(c, http.StatusNotFound, "not_found")
 			return
 		}
 		log.Error("users: get failed", "err", err, "id", id)
-		c.JSON(http.StatusInternalServerError, httperr.Response{Error: "internal_error"})
+		response.Error(c, http.StatusInternalServerError, "internal_error")
 		return
 	}
-	c.JSON(http.StatusOK, toResponse(*u))
+	response.OK(c, "user", toResponse(*u))
 }
 
 func (h *UsersHandler) Create(c *gin.Context) {
 	var req createUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, httperr.Response{Error: "invalid_body"})
+		response.Error(c, http.StatusBadRequest, "invalid_body", response.ValidationDetails(err)...)
 		return
 	}
 	u, err := h.uc.Create(c.Request.Context(), req.Email, req.Name)
 	if err != nil {
 		if errors.Is(err, usecase.ErrUserEmailTaken) {
-			c.JSON(http.StatusConflict, httperr.Response{Error: "email_taken"})
+			response.Error(c, http.StatusConflict, "email_taken")
+			return
+		}
+		// Any validation error (currently from the domain) carries its own
+		// field details — render them generically, no per-rule branches.
+		if details := response.ValidationDetails(err); details != nil {
+			response.Error(c, http.StatusBadRequest, "invalid_body", details...)
 			return
 		}
 		log.Error("users: create failed", "err", err, "email", req.Email)
-		c.JSON(http.StatusInternalServerError, httperr.Response{Error: "internal_error"})
+		response.Error(c, http.StatusInternalServerError, "internal_error")
 		return
 	}
-	c.JSON(http.StatusCreated, toResponse(*u))
+	response.Created(c, "user", toResponse(*u))
 }

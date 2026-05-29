@@ -3,7 +3,6 @@ package usecase
 import (
 	"context"
 	"errors"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -38,13 +37,9 @@ func (s *UserUseCase) Get(ctx context.Context, id uuid.UUID) (*domain.User, erro
 }
 
 func (s *UserUseCase) Create(ctx context.Context, email, name string) (*domain.User, error) {
-	now := time.Now()
-	u := &domain.User{
-		ID:        uuid.New(),
-		Email:     email,
-		Name:      name,
-		CreatedAt: now,
-		UpdatedAt: now,
+	u, err := domain.NewUser(email, name)
+	if err != nil {
+		return nil, err
 	}
 	if err := s.repo.Create(ctx, u); err != nil {
 		return nil, err

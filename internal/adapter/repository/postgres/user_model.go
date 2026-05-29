@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,14 +19,12 @@ type userModel struct {
 
 func (userModel) TableName() string { return "users" }
 
-func (m userModel) toDomain() domain.User {
-	return domain.User{
-		ID:        m.ID,
-		Email:     m.Email,
-		Name:      m.Name,
-		CreatedAt: m.CreatedAt,
-		UpdatedAt: m.UpdatedAt,
+func (m userModel) toDomain() (domain.User, error) {
+	u, err := domain.ReconstituteUser(m.ID, m.Email, m.Name, m.CreatedAt, m.UpdatedAt)
+	if err != nil {
+		return domain.User{}, fmt.Errorf("reconstitute user %s: %w", m.ID, err)
 	}
+	return *u, nil
 }
 
 func fromDomain(u domain.User) userModel {

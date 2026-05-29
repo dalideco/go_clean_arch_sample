@@ -32,7 +32,11 @@ func (r *UserRepository) List(ctx context.Context) ([]domain.User, error) {
 	}
 	users := make([]domain.User, len(models))
 	for i, m := range models {
-		users[i] = m.toDomain()
+		u, err := m.toDomain()
+		if err != nil {
+			return nil, err
+		}
+		users[i] = u
 	}
 	return users, nil
 }
@@ -45,7 +49,10 @@ func (r *UserRepository) Get(ctx context.Context, id uuid.UUID) (*domain.User, e
 		}
 		return nil, err
 	}
-	u := m.toDomain()
+	u, err := m.toDomain()
+	if err != nil {
+		return nil, err
+	}
 	return &u, nil
 }
 
