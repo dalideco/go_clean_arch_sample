@@ -1,4 +1,4 @@
-package service
+package usecase
 
 import (
 	"context"
@@ -21,23 +21,23 @@ type UserRepository interface {
 	Create(ctx context.Context, u *domain.User) error
 }
 
-type UserService struct {
+type UserUseCase struct {
 	repo UserRepository
 }
 
-func NewUserService(repo UserRepository) *UserService {
-	return &UserService{repo: repo}
+func NewUserUseCase(repo UserRepository) *UserUseCase {
+	return &UserUseCase{repo: repo}
 }
 
-func (s *UserService) List(ctx context.Context) ([]domain.User, error) {
+func (s *UserUseCase) List(ctx context.Context) ([]domain.User, error) {
 	return s.repo.List(ctx)
 }
 
-func (s *UserService) Get(ctx context.Context, id uuid.UUID) (*domain.User, error) {
+func (s *UserUseCase) Get(ctx context.Context, id uuid.UUID) (*domain.User, error) {
 	return s.repo.Get(ctx, id)
 }
 
-func (s *UserService) Create(ctx context.Context, email, name string) (*domain.User, error) {
+func (s *UserUseCase) Create(ctx context.Context, email, name string) (*domain.User, error) {
 	now := time.Now()
 	u := &domain.User{
 		ID:        uuid.New(),

@@ -23,13 +23,14 @@ func main() {
 
 	db := startDbConnection(cfg)
 	defer closeDB(db)
+	repos := postgres.NewRepositories(db)
 
 	gin.DefaultWriter = log.Writer(log.LevelInfo)
 	gin.DefaultErrorWriter = log.Writer(log.LevelError)
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.HTTPPort,
-		Handler: api.New(db),
+		Handler: api.New(repos),
 	}
 
 	serverErr := startServer(srv)

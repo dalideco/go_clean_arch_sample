@@ -19,7 +19,7 @@ cmd/
   seed/main.go             # Seed runner (Step 5)
 internal/
   domain/                  # entities (innermost layer; no project-internal deps)
-  service/                 # use cases / application services
+  usecase/                 # use cases / application business rules
   tasks/                   # shared task payload types + name constants
                            # imported by both adapter/queue/ and adapter/worker/
   config/                  # env loading
@@ -36,7 +36,7 @@ internal/
     worker/                # asynq server + task handlers
 ```
 
-**Dependency rule:** `cmd → adapter → service → domain`. Domain imports nothing project-internal. `adapter/queue/` and `adapter/worker/` both depend on `internal/tasks/` for shared payload types — `tasks/` is a contract, not an adapter. `log/` and `config/` are cross-cutting and used by everyone.
+**Dependency rule:** `cmd → adapter → usecase → domain`. Domain imports nothing project-internal. `adapter/queue/` and `adapter/worker/` both depend on `internal/tasks/` for shared payload types — `tasks/` is a contract, not an adapter. `log/` and `config/` are cross-cutting and used by everyone.
 
 ## Conventions in force
 - **Error responses** use snake_case codes: `{"error": "<code>"}` (e.g. `not_found`, `internal_error`). Set in `internal/adapter/http/middleware/{not_found,recovery}.go`; applies to all handlers.
@@ -110,11 +110,11 @@ curl -s localhost:8080/missing   # → {"error":"not_found"}
 
 **Implemented:**
 - `mise.toml` (repo root) — pins `go = "1.25.0"`; installs `dlv` via mise's `go:` backend (`"go:github.com/go-delve/delve/cmd/dlv" = "latest"`) so `mise install` is the one-and-only setup step; auto-loads `.env` into the shell via `[env] _.file = ".env"`; tasks: `server` (`go run ./cmd/api`), `console` (`dlv debug ./cmd/api`), `cli` (`go run ./cmd/cli`).
-- `cmd/cli/main.go` — Cobra root command, no subcommands yet. Heavy package doc comment explaining the rationale (Go has no `iex --remsh`; ops actions are CLI subcommands that wrap `internal/service/...` functions), what NOT to use this binary for, and how to add a subcommand. Future command files (`cmd/cli/requests.go`, etc.) will be lean — rationale lives once in `main.go`.
+- `cmd/cli/main.go` — Cobra root command, no subcommands yet. Heavy package doc comment explaining the rationale (Go has no `iex --remsh`; ops actions are CLI subcommands that wrap `internal/usecase/...` functions), what NOT to use this binary for, and how to add a subcommand. Future command files (`cmd/cli/requests.go`, etc.) will be lean — rationale lives once in `main.go`.
 - `go.mod` — added `github.com/spf13/cobra` (de-facto Go CLI library; stdlib `flag` is fine for one command, painful at five).
 - **godotenv stays.** mise auto-loads `.env` into interactive shells; `godotenv.Load()` in `config.go` handles compiled-binary, CI, and prod cases where mise isn't managing the shell.
 
-**Convention:** every ad-hoc operation an operator might run (list/retry/cancel a job, update a row in a controlled way, etc.) lands as a subcommand under `cmd/cli/`, each wrapping an `internal/service/...` function so the same domain logic backs both HTTP handlers and CLI invocations.
+**Convention:** every ad-hoc operation an operator might run (list/retry/cancel a job, update a row in a controlled way, etc.) lands as a subcommand under `cmd/cli/`, each wrapping an `internal/usecase/...` function so the same domain logic backs both HTTP handlers and CLI invocations.
 
 **Verify** — confirmed working:
 - `mise install` — installs Go 1.25.0 if missing.
@@ -125,58 +125,36 @@ curl -s localhost:8080/missing   # → {"error":"not_found"}
 
 ---
 
-## Step 3 — Postgres + GORM
-**Goal:** API can talk to Postgres. Add a `User` entity and a `GET /users` endpoint that returns rows from the database (initially empty). This is the first step that exercises the full layer stack: handler → service → repository → db.
+## Step 3 — Postgres + GORM ✅ DONE
+**Goal:** API can talk to Postgres. Add a `User` entity and `GET/POST /users` endpoints exercising the full layer stack: handler → service → repository → db.
 
-**Install**
+**Layering decision (revised — the original pragmatic call was reversed):** the first draft above proposed *one* `User` struct serving both domain entity and persistence model, with `gorm:` + `json:` tags on it. We rejected that: it leaks ORM/transport concerns into the innermost layer. Final approach is strict separation —
+- `internal/domain/user.go` — plain struct, **zero** `gorm:`/`json:`/`binding:` tags.
+- `internal/adapter/repository/postgres/user_model.go` — separate `userModel` (GORM tags live here) + `toDomain`/`fromDomain`.
+- `internal/adapter/http/handler/users.go` — wire DTOs (`createUserRequest`, `userResponse`) with `json:`/`binding:` tags live here.
+- `internal/usecase/user.go` — owns the `UserRepository` interface (dependency inversion) and error sentinels `ErrUserNotFound`, `ErrUserEmailTaken`; business logic in `UserUseCase`.
+
+**Implemented:**
+- Config (`internal/config/`): DB env vars (`DB_HOST/PORT/USER/PASSWORD/NAME/SSL_MODE`) + `mustGetenv` helper + `DatabaseDSN()`; pool knobs hardcoded per profile (prod 25/5/5m, dev 10/2/5m, test 5/1/1m).
+- `postgres/db.go` — `New(cfg) (*gorm.DB, error)`: open, ping, pool limits. `postgres/gorm_logger.go` — bridges GORM's logger to `internal/log` (the only sanctioned `fmt.Sprintf`-into-logger bridge).
+- `postgres/user_repository.go` — implements `usecase.UserRepository`; converts `gorm.ErrRecordNotFound` → `usecase.ErrUserNotFound` and `pgconn.PgError` `23505` → `usecase.ErrUserEmailTaken` at the boundary. `*gorm.DB` never leaves the package via exported signatures.
+- `handler/users.go` — depends on an unexported `userServicer` interface (consumer-side inversion, fake-able in tests); maps sentinels to 404 / 409, logs unexpected errors before 500.
+- **Wiring is swap-resistant:** `usecase.Repositories` bundle + `postgres.NewRepositories(db)`; per-feature `router.RegisterUsers(r, repos)`; `api.New(repos)`. `gorm.io/...` is confined to `cmd/api/main.go` + `internal/adapter/repository/postgres/` — the entire HTTP layer is ORM-agnostic. Adding an entity never touches `main.go`.
+- **Dev-only CLI lifecycle:** `cmd/cli` `db_setup` / `db_reset` (gated to `EnvDev`) → `postgres.CreateDatabase` / `DropDatabase`, plus a **temporary** `postgres.AutoMigrate` for schema bring-up (removed when Step 4 lands). Conventions live in `AGENTS.md` (renamed from CLAUDE.md for cross-vendor agents).
+
+**Note:** `db.AutoMigrate` is used **only** as a dev-only bring-up via `cli db_setup`, never at API boot — schema authority still belongs to migrations (Step 4).
+
+**Verify** (DB on `localhost:5432`, `.env` sets `DB_NAME=go_db`):
 ```bash
-go get gorm.io/gorm
-go get gorm.io/driver/postgres
-go get github.com/google/uuid
-```
+mise run cli -- db_reset      # drop + recreate go_db, AutoMigrate users table
+mise run server               # boots; "db connected" then "starting server"
 
-**Run Postgres locally** (temporary — Step 7 replaces this with compose):
-```bash
-docker run -d --name pg -p 5432:5432 \
-  -e POSTGRES_USER=app -e POSTGRES_PASSWORD=app -e POSTGRES_DB=app \
-  postgres:16-alpine
-```
-
-**Files**
-- `internal/domain/user.go`
-  - `type User struct { ID uuid.UUID; Email, Name string; CreatedAt, UpdatedAt time.Time }` with GORM tags + JSON tags. (Pragmatic: one struct serves domain + persistence model. Re-evaluate if domain grows complex.)
-- `internal/service/user.go`
-  - `type UserRepository interface { List(ctx) ([]domain.User, error); Get(ctx, id) (*domain.User, error); Create(ctx, *domain.User) error }` — interface owned by the service layer (dependency inversion).
-  - `type UserService struct { repo UserRepository }`
-  - `func NewUserService(repo UserRepository) *UserService`
-  - Methods: `List`, `Get`, `Create`.
-- `internal/adapter/repository/postgres/db.go`
-  - `func New(cfg *config.Config) (*gorm.DB, error)`: GORM open, ping `*sql.DB`, set pool limits (`SetMaxOpenConns(25)`, `SetMaxIdleConns(5)`, `SetConnMaxLifetime(5*time.Minute)`).
-- `internal/adapter/repository/postgres/user_repository.go`
-  - `type UserRepository struct { db *gorm.DB }` — implements `service.UserRepository`.
-- `internal/adapter/http/handler/users.go`
-  - `type UsersHandler struct { svc *service.UserService }`
-  - `List`, `Get`, `Create` methods (Create is bind+validate JSON, no enqueue yet — added in Step 6).
-- Update `internal/adapter/http/router/router.go` — accept a `Handlers` struct (or similar dependency container), register `/users` routes.
-- Update `internal/adapter/http/api/api.go` — accept dependencies, pass to `router.Register`.
-- `cmd/api/main.go` — wire: `cfg → db → repo → svc → handlers → api.New(handlers)`.
-
-**Note:** Don't use `db.AutoMigrate` — schema authority belongs to migrations (Step 4).
-
-**Verify**
-```bash
-# Manually create the table for now (Step 4 automates this):
-docker exec -i pg psql -U app -d app <<'SQL'
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE TABLE users (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  email TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW());
-SQL
-
-curl -s localhost:8080/users                  # → []
-curl -X POST localhost:8080/users -H 'Content-Type: application/json' \
-     -d '{"email":"a@b.com","name":"Test"}'   # → 201
-curl -s localhost:8080/users                  # → [{...}]
+curl -s localhost:8081/users                                   # → []
+curl -X POST localhost:8081/users -H 'Content-Type: application/json' \
+     -d '{"email":"a@b.com","name":"Test"}'                    # → 201
+curl -X POST localhost:8081/users -H 'Content-Type: application/json' \
+     -d '{"email":"a@b.com","name":"Dup"}'                     # → 409 {"error":"email_taken"}
+curl -s localhost:8081/users/<id>                              # → {...}; random uuid → 404; bad uuid → 400
 ```
 
 ---
@@ -275,7 +253,7 @@ docker run -d --name redis -p 6379:6379 redis:7-alpine
   - `config.Load()` → `log.Setup(cfg)` → `db.New(cfg)` → build `asynq.NewServer(cfg.RedisOpt(), asynq.Config{Concurrency: 10, Queues: map[string]int{"default": 1}})`.
   - `mux := asynq.NewServeMux(); mux.HandleFunc(tasks.TypeWelcomeEmail, (&worker.EmailHandler{DB: db}).HandleWelcomeEmail)`
   - `srv.Run(mux)` — asynq handles SIGINT/SIGTERM itself.
-- Update `internal/service/user.go` — `Create` calls `queue.EnqueueWelcomeEmail(ctx, user.ID)` after the DB insert. **Log and continue on enqueue failure** — don't fail the request, the user is already saved (comment why).
+- Update `internal/usecase/user.go` — `Create` calls `queue.EnqueueWelcomeEmail(ctx, user.ID)` after the DB insert. **Log and continue on enqueue failure** — don't fail the request, the user is already saved (comment why).
 - Update `internal/adapter/http/api/api.go`, `internal/adapter/http/router/router.go`, `cmd/api/main.go` — pass `*queue.Client` through the dependency chain.
 
 **Verify**

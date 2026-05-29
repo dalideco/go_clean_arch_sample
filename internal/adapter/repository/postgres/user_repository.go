@@ -9,7 +9,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/dali/go_project_sample/internal/domain"
-	"github.com/dali/go_project_sample/internal/service"
+	"github.com/dali/go_project_sample/internal/usecase"
 )
 
 // pgUniqueViolation is the SQLSTATE code Postgres returns for a unique-index
@@ -41,7 +41,7 @@ func (r *UserRepository) Get(ctx context.Context, id uuid.UUID) (*domain.User, e
 	var m userModel
 	if err := r.db.WithContext(ctx).First(&m, "id = ?", id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, service.ErrUserNotFound
+			return nil, usecase.ErrUserNotFound
 		}
 		return nil, err
 	}
@@ -54,7 +54,7 @@ func (r *UserRepository) Create(ctx context.Context, u *domain.User) error {
 	if err := r.db.WithContext(ctx).Create(&m).Error; err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
-			return service.ErrUserEmailTaken
+			return usecase.ErrUserEmailTaken
 		}
 		return err
 	}

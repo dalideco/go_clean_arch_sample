@@ -3,7 +3,7 @@
 // Unlike cmd/api (which serves HTTP traffic), this binary is meant to be
 // run by an operator from the shell — locally during development, or via
 // SSH on a deployed environment. Each subcommand wraps a function in
-// internal/service/..., so the same domain logic that powers HTTP handlers
+// internal/usecase/..., so the same domain logic that powers HTTP handlers
 // is also reachable from the command line.
 //
 // Why this exists
@@ -25,10 +25,10 @@
 //
 // Adding a new subcommand
 // -----------------------
-//  1. Implement the operation in internal/service/<area>/ as a function
+//  1. Implement the operation in internal/usecase/<area>/ as a function
 //     taking ctx + typed args, returning typed results + error.
 //  2. Add a file here (e.g. cmd/cli/requests.go) that parses flags, wires
-//     up dependencies (DB handle, etc.), and calls the service function.
+//     up dependencies (DB handle, etc.), and calls the use-case function.
 //  3. Register it: rootCmd.AddCommand(newRequestsCmd()).
 //
 // Invocation
@@ -53,7 +53,7 @@ var rootCmd = &cobra.Command{
 	Short: "Operator CLI for go_project_sample",
 	Long: `Operator CLI for go_project_sample.
 
-Each subcommand wraps an internal/service function so domain logic is
+Each subcommand wraps an internal/usecase function so domain logic is
 reachable both from HTTP handlers and from this command line. See the
 package doc comment in cmd/cli/main.go for the full rationale.`,
 }

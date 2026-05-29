@@ -12,24 +12,24 @@ import (
 	"github.com/dali/go_project_sample/internal/adapter/http/httperr"
 	"github.com/dali/go_project_sample/internal/domain"
 	"github.com/dali/go_project_sample/internal/log"
-	"github.com/dali/go_project_sample/internal/service"
+	"github.com/dali/go_project_sample/internal/usecase"
 )
 
-// userServicer is the handler-side view of UserService. Declaring the
+// userUseCase is the handler-side view of UserUseCase. Declaring the
 // interface here (consumer side) keeps the handler unbound from the
-// concrete service struct so tests can inject a fake without touching DB.
-// *service.UserService satisfies this via structural typing.
-type userServicer interface {
+// concrete use-case struct so tests can inject a fake without touching DB.
+// *usecase.UserUseCase satisfies this via structural typing.
+type userUseCase interface {
 	List(ctx context.Context) ([]domain.User, error)
 	Get(ctx context.Context, id uuid.UUID) (*domain.User, error)
 	Create(ctx context.Context, email, name string) (*domain.User, error)
 }
 
 type UsersHandler struct {
-	svc userServicer
+	svc userUseCase
 }
 
-func NewUsersHandler(svc userServicer) *UsersHandler {
+func NewUsersHandler(svc userUseCase) *UsersHandler {
 	return &UsersHandler{svc: svc}
 }
 
@@ -78,7 +78,7 @@ func (h *UsersHandler) Get(c *gin.Context) {
 	}
 	u, err := h.svc.Get(c.Request.Context(), id)
 	if err != nil {
-		if errors.Is(err, service.ErrUserNotFound) {
+		if errors.Is(err, usecase.ErrUserNotFound) {
 			c.JSON(http.StatusNotFound, httperr.Response{Error: "not_found"})
 			return
 		}
@@ -97,7 +97,7 @@ func (h *UsersHandler) Create(c *gin.Context) {
 	}
 	u, err := h.svc.Create(c.Request.Context(), req.Email, req.Name)
 	if err != nil {
-		if errors.Is(err, service.ErrUserEmailTaken) {
+		if errors.Is(err, usecase.ErrUserEmailTaken) {
 			c.JSON(http.StatusConflict, httperr.Response{Error: "email_taken"})
 			return
 		}
