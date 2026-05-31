@@ -42,7 +42,7 @@ func runDBSetup(cfg *config.Config) error {
 	if err := postgres.CreateDatabase(cfg); err != nil {
 		return err
 	}
-	if err := postgres.AutoMigrate(cfg); err != nil {
+	if err := postgres.Migrate(cfg); err != nil {
 		return err
 	}
 	log.Info("db_setup: database ready", "db", cfg.DBName)

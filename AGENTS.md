@@ -42,7 +42,7 @@ Strict dependency direction: `domain` ← `usecase` ← `adapter` ← `cmd`. Inn
   - Use `r.db.WithContext(ctx)` so request cancellation reaches the driver.
   - Convert `gorm.ErrRecordNotFound` → the corresponding domain sentinel (`usecase.ErrXxxNotFound`).
   - Return `domain.X`, never `userModel` or anything GORM-typed.
-- Schema authority lives in versioned SQL migrations (Step 4: `golang-migrate`). **Temporary exception**: `postgres.AutoMigrate(cfg)` exists as a dev-only schema bring-up, called exclusively from `cmd/cli` via `db_setup` / `db_reset`. It must **not** be called from `cmd/api` or any boot path. When Step 4 lands, `postgres.AutoMigrate` is deleted along with its caller.
+- Schema authority lives in versioned migrations under `internal/adapter/repository/postgres/migrations/` (one file per migration, aggregated in `migrations.All`), applied via `postgres.Migrate(cfg)` from `cmd/cli` (`cli migrate`, idempotent, all envs; or as part of dev's `cli db_setup`). Each migration is a **self-contained** Go function using a *frozen* struct snapshot (never the live `userModel`) or raw `tx.Exec` — referencing the live model would silently change historical migrations as it evolves. **Do not call `db.AutoMigrate`** anywhere; the schema must come from the migration sequence.
 
 ### `internal/adapter/http/handler/`
 - Imports `internal/usecase`, `internal/domain`, and `internal/adapter/http/response`. Never `internal/adapter/repository/...`, never `gorm.io/...`.
@@ -90,7 +90,7 @@ If a change would flip any of these, push back — that's a layering violation.
 5. `internal/adapter/http/handler/foos.go` — `FoosHandler` + `createFooRequest` / `fooResponse` DTOs, JSON tags here.
 6. Add `Foos FooRepository` to `usecase.Repositories` (`internal/usecase/repositories.go`) and `Foos: NewFooRepository(db)` to `postgres.NewRepositories` (`internal/adapter/repository/postgres/repositories.go`).
 7. `internal/adapter/http/router/foos.go` — `RegisterFoos(r gin.IRouter, repos usecase.Repositories)` constructs `usecase.NewFooUseCase(repos.Foos)` → `handler.NewFoosHandler(svc)` and mounts the routes. Add one line `RegisterFoos(engine, repos)` to `router.Register` in `router.go`. **`main.go` does not change.**
-8. Add a migration in the migrations dir (once Step 4 lands).
+8. `internal/adapter/repository/postgres/migrations/<YYYYMMDDHHMMSS>_<desc>.go` (timestamp via `date +%Y%m%d%H%M%S`) — an `init()` that calls `register(&gormigrate.Migration{...})` with the matching `"<YYYYMMDDHHMMSS>_<desc>"` ID and `Migrate`/`Rollback` funcs (use a *frozen* local struct, not the live model). The set of migrations is whatever files are in the directory — no central manifest to touch.
 
 ## Build / verify
 

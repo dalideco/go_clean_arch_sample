@@ -26,28 +26,6 @@ func DropDatabase(cfg *config.Config) error {
 	return nil
 }
 
-// AutoMigrate applies the current persistence-model schema to cfg.DBName
-// using gorm.AutoMigrate. This is a *temporary* schema bring-up: it exists
-// so dev can run `cli db_setup` and get a working schema before Step 4
-// (golang-migrate) lands. Once real migrations exist, this function and
-// its caller in cmd/cli/db.go are removed.
-//
-// Add new persistence models to the list below as features are introduced.
-// NOT to be called from cmd/api — schema state must not be mutated at app
-// boot time.
-func AutoMigrate(cfg *config.Config) error {
-	db, err := New(cfg)
-	if err != nil {
-		return err
-	}
-	defer closeAdmin(db)
-
-	if err := db.AutoMigrate(&userModel{}); err != nil {
-		return fmt.Errorf("auto-migrate: %w", err)
-	}
-	return nil
-}
-
 // CreateDatabase creates cfg.DBName if it doesn't already exist. Safe to call
 // repeatedly. Connects to the "postgres" maintenance database.
 func CreateDatabase(cfg *config.Config) error {

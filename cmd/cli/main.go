@@ -62,12 +62,17 @@ func main() {
 	cfg := config.Load()
 	log.Setup(cfg.LogFormat, cfg.LogLevel)
 
-	// Dev-only commands. Destructive or local-bring-up operations must not
-	// be reachable in prod/test envs — gate them here so they don't even
-	// appear in `cli --help` outside dev.
+	// migrate / migrate_status are idempotent / read-only — register in all envs.
+	rootCmd.AddCommand(newMigrateCmd(cfg))
+	rootCmd.AddCommand(newMigrateStatusCmd(cfg))
+
+	// Dev-only commands. Destructive operations, local-bring-up, and source
+	// scaffolding must not be reachable in prod/test envs — gate them here
+	// so they don't even appear in `cli --help` outside dev.
 	if cfg.Env == config.EnvDev {
 		rootCmd.AddCommand(newDBSetupCmd(cfg))
 		rootCmd.AddCommand(newDBResetCmd(cfg))
+		rootCmd.AddCommand(newGenerateMigrationCmd(cfg))
 	}
 
 	if err := rootCmd.Execute(); err != nil {
