@@ -9,7 +9,7 @@ import (
 	"github.com/dali/go_project_sample/internal/usecase"
 )
 
-func New(repos usecase.Repositories) *gin.Engine {
+func New(deps usecase.Deps) *gin.Engine {
 	response.RegisterFieldNames()
 
 	engine := gin.New()
@@ -18,7 +18,7 @@ func New(repos usecase.Repositories) *gin.Engine {
 	engine.Use(middleware.RequestLogger(), middleware.Recovery())
 	engine.NoRoute(middleware.NotFound)
 
-	router.Register(engine, repos)
+	router.Register(engine, deps)
 
 	return engine
 }

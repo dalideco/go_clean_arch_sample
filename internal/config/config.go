@@ -62,6 +62,9 @@ type Config struct {
 	DBMaxOpenConns    int
 	DBMaxIdleConns    int
 	DBConnMaxLifetime time.Duration
+
+	RedisAddr     string
+	RedisPassword string
 }
 
 func (c *Config) DatabaseDSN() string {
@@ -106,6 +109,9 @@ func baseConfig() *Config {
 		DBMaxOpenConns:    25,
 		DBMaxIdleConns:    5,
 		DBConnMaxLifetime: 5 * time.Minute,
+
+		RedisAddr:     mustGetenv("REDIS_ADDR"),
+		RedisPassword: getenv("REDIS_PASSWORD", ""),
 	}
 }
 

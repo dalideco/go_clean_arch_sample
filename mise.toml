@@ -16,3 +16,19 @@ run = "dlv debug ./cmd/api"
 [tasks.cli]
 description = "Run the operator CLI (pass subcommand args after --)"
 run = "go run ./cmd/cli"
+
+[tasks.worker]
+description = "Run the asynq worker"
+run = "go run ./cmd/worker"
+
+[tasks.infra]
+description = "Bring up local Postgres + Redis via docker compose"
+run = "docker compose up -d"
+
+[tasks."infra:dev"]
+description = "Local infra + asynqmon UI (on http://localhost:8082)"
+run = "docker compose --profile dev up -d"
+
+[tasks."infra:down"]
+description = "Stop local infra (keep data)"
+run = "docker compose down"

@@ -1,0 +1,56 @@
+# Local infrastructure for development. Brings up the same Postgres + Redis
+# the app expects, behind named volumes so data survives `docker compose down`.
+# The API and worker run on the host today (`mise run server` / `mise run
+# worker`) and connect to these services on localhost — Step 9 will add app
+# images + a migrate service to this file.
+#
+# Usage:
+#   docker compose up -d                       # postgres + redis
+#   docker compose --profile dev up -d         # + asynqmon UI on :8082
+#   docker compose down                        # stop, keep data
+#   docker compose down -v                     # stop, wipe pgdata/redisdata
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: go_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d go_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Web UI for the asynq queue: pending / processed / failed tasks, retry,
+  # archive. Opt-in via the dev profile to keep the default `up` minimal.
+  asynqmon:
+    image: hibiken/asynqmon:latest
+    profiles: ["dev"]
+    command: ["--redis-addr=redis:6379"]
+    ports:
+      - "8082:8080"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  redisdata:

@@ -9,8 +9,8 @@ import (
 
 // Register mounts all HTTP routes on engine. Add one line per feature —
 // each feature's wiring lives in its own router/<feature>.go file.
-func Register(engine *gin.Engine, repos usecase.Repositories) {
+func Register(engine *gin.Engine, deps usecase.Deps) {
 	engine.GET("/health", handler.Health)
 
-	RegisterUsers(engine, repos)
+	RegisterUsers(engine, deps)
 }

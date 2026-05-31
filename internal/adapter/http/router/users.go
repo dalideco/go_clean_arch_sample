@@ -9,10 +9,11 @@ import (
 
 // RegisterUsers wires the users feature end-to-end and mounts its routes
 // on r. This is the per-feature composition root: it owns the construction
-// of use case → handler so that main.go does not grow per feature. The
-// repository comes pre-built in the bundle, so this file is ORM-agnostic.
-func RegisterUsers(r gin.IRouter, repos usecase.Repositories) {
-	uc := usecase.NewUserUseCase(repos.Users)
+// of use case → handler so that main.go does not grow per feature. Deps
+// carries pre-built repository + producer bundles, so this file is
+// ORM-agnostic and queue-tech-agnostic.
+func RegisterUsers(r gin.IRouter, deps usecase.Deps) {
+	uc := usecase.NewUserUseCase(deps.Repos.Users, deps.Producers.WelcomeEmail)
 	h := handler.NewUsersHandler(uc)
 
 	r.GET("/users", h.List)

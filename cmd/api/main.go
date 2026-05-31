@@ -15,6 +15,8 @@ import (
 	"github.com/dali/go_project_sample/internal/adapter/repository/postgres"
 	"github.com/dali/go_project_sample/internal/config"
 	"github.com/dali/go_project_sample/internal/log"
+	"github.com/dali/go_project_sample/internal/queue"
+	"github.com/dali/go_project_sample/internal/usecase"
 )
 
 func main() {
@@ -25,12 +27,21 @@ func main() {
 	defer closeDB(db)
 	repos := postgres.NewRepositories(db)
 
+	queueClient := queue.New(cfg)
+	defer func() { _ = queueClient.Close() }()
+	log.Info("queue client opened", "redis_addr", cfg.RedisAddr)
+
+	deps := usecase.Deps{
+		Repos:     repos,
+		Producers: queue.NewProducers(queueClient),
+	}
+
 	gin.DefaultWriter = log.Writer(log.LevelInfo)
 	gin.DefaultErrorWriter = log.Writer(log.LevelError)
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.HTTPPort,
-		Handler: api.New(repos),
+		Handler: api.New(deps),
 	}
 
 	serverErr := startServer(srv)

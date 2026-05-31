@@ -227,50 +227,41 @@ APP_ENV=prod go run ./cmd/cli seed                           # → unknown comma
 
 ---
 
-## Step 6 — Asynq Worker + Redis
-**Goal:** `POST /users` enqueues a "send welcome email" task; a separate worker process consumes it and logs the email.
+## Step 6 — Asynq Worker + Redis ✅ DONE
+**Goal:** `POST /users` enqueues a welcome-email task; a separate worker process consumes it and (today) logs the send.
 
-**Install**
-```bash
-go get github.com/hibiken/asynq
-```
+**Failure semantics chosen:** log + continue on enqueue failure — the user is already committed, a missed welcome email is not a request failure. Documented in `AGENTS.md`; the comment in `UserUseCase.Create` flags the outbox-pattern seam if delivery ever becomes business-critical.
 
-**Run Redis locally** (temporary — Step 8 moves it to compose):
-```bash
-docker run -d --name redis -p 6379:6379 redis:7-alpine
-```
-
-**Files**
-- Update `internal/config/config.go` — add `RedisOpt() asynq.RedisClientOpt` returning `asynq.RedisClientOpt{Addr: c.RedisAddr, Password: c.RedisPassword}`.
-- `internal/tasks/tasks.go` — task name constants. `const TypeWelcomeEmail = "email:welcome"`.
-- `internal/tasks/email.go` — payload types only (no asynq logic).
-  - `type WelcomeEmailPayload struct { UserID uuid.UUID }`
-  - `func NewWelcomeEmailTask(userID uuid.UUID) (*asynq.Task, error)` — JSON-marshals payload, returns `asynq.NewTask(TypeWelcomeEmail, data)`. (This *does* import asynq, but the type itself is the contract.)
-- `internal/adapter/queue/client.go`
-  - `type Client struct { c *asynq.Client }`
-  - `func NewClient(opt asynq.RedisClientOpt) *Client`
-  - `func (c *Client) EnqueueWelcomeEmail(ctx context.Context, userID uuid.UUID) error` — uses `tasks.NewWelcomeEmailTask`.
-  - `func (c *Client) Close() error`
-- `internal/adapter/worker/email.go`
-  - `type EmailHandler struct { db *gorm.DB }`
-  - `func (h *EmailHandler) HandleWelcomeEmail(ctx context.Context, t *asynq.Task) error` — unmarshal `tasks.WelcomeEmailPayload`, look up user, log `"sending welcome email to <email>"`. Return non-nil error to trigger asynq's retry.
-- `cmd/worker/main.go`
-  - `config.Load()` → `log.Setup(cfg)` → `db.New(cfg)` → build `asynq.NewServer(cfg.RedisOpt(), asynq.Config{Concurrency: 10, Queues: map[string]int{"default": 1}})`.
-  - `mux := asynq.NewServeMux(); mux.HandleFunc(tasks.TypeWelcomeEmail, (&worker.EmailHandler{DB: db}).HandleWelcomeEmail)`
-  - `srv.Run(mux)` — asynq handles SIGINT/SIGTERM itself.
-- Update `internal/usecase/user.go` — `Create` calls `queue.EnqueueWelcomeEmail(ctx, user.ID)` after the DB insert. **Log and continue on enqueue failure** — don't fail the request, the user is already saved (comment why).
-- Update `internal/adapter/http/api/api.go`, `internal/adapter/http/router/router.go`, `cmd/api/main.go` — pass `*queue.Client` through the dependency chain.
+**Implemented:**
+- **Single `internal/queue/` package** owns both sides of the asynq + Redis boundary (producer + consumer) **and** the payload contract. The original three-way split (`tasks/` + `adapter/queue/` + `adapter/worker/`) was collapsed — producer and consumer were the same monolith on either side of one Redis, so the separation bought nothing the Go linker doesn't already give us via dead-code elimination.
+  - **One file per task type:** `internal/queue/welcome_email.go` holds `TypeWelcomeEmail` + `WelcomeEmailPayload` + `(c *Client) EnqueueWelcomeEmail(...)` producer method + `WelcomeEmailHandler.Handle(...)` consumer. Adding a task = one new file with all three sides.
+  - **Shared infra:** `client.go` (`Client` wrapping `*asynq.Client`, `New(cfg)`, `Close()`, `NewProducers(c) usecase.Producers`, `RedisOpt(cfg)`) and `logger.go` (`NewAsynqLogger()` printf→`internal/log` bridge — same shape as gormLogger).
+  - Consumer-side handlers depend on the *narrowest* use-case-layer interface they actually need (`usecase.UserRepository` for read-only lookups — don't drag in the full `UserUseCase` or its write-side producers).
+- **Consumer-defined interface** `WelcomeEmailEnqueuer` in `internal/usecase/user.go`; `UserUseCase` gets a `welcome` field, `Create` enqueues after the repo create with log + continue.
+- **`usecase.Producers` bundle** in `internal/usecase/producers.go` — mirror of `Repositories`. Folded into `usecase.Deps` (along with `Repos`) so wiring signatures don't grow: `api.New(deps)` → `router.Register(engine, deps)` → `RegisterUsers(r, deps)`.
+- **`cmd/worker/main.go`** composition root: config → log → DB → repos → `asynq.NewServer(queue.RedisOpt(cfg), asynq.Config{Concurrency: 10, Logger: queue.NewAsynqLogger()})` → `asynq.ServeMux` with `queue.TypeWelcomeEmail` handler → `srv.Run(mux)` (asynq owns SIGINT/SIGTERM).
+- **Seeds use a no-op enqueuer** — demo emails are fake, no point spamming the queue with junk tasks for `alice@example.com` etc.
+- Config gains `RedisAddr`/`RedisPassword`; `.env` + `.env.example` get `REDIS_ADDR=localhost:6379`; `mise.toml` gets `[tasks.worker]`.
 
 **Verify**
 ```bash
-# Terminal 1
-go run ./cmd/worker
-# Terminal 2
-go run ./cmd/api
-# Terminal 3
-curl -X POST localhost:8080/users -H 'Content-Type: application/json' \
+docker run -d --name redis -p 6379:6379 redis:7-alpine   # Step 8 moves to compose
+mise run cli -- db_reset
+mise run worker &                                          # waits on tasks
+mise run server &
+
+# Create a user → 201 + worker logs the send within ~ms
+curl -X POST localhost:8081/users -H 'Content-Type: application/json' \
      -d '{"email":"new@example.com","name":"New"}'
-# Terminal 1 logs: "sending welcome email to new@example.com"
+# worker stdout: INF welcome email sent to=new@example.com user_id=<uuid>
+
+# Log-and-continue on Redis outage: user still saved, no welcome task
+docker stop redis
+curl -X POST localhost:8081/users -d '{"email":"loss@example.com","name":"L"}'   # → 201
+# API logs: WRN welcome email enqueue failed err=...
+docker start redis
+
+pkill -f "go run ./cmd/(api|worker)"
 ```
 
 ---
@@ -305,26 +296,40 @@ mise run lint           # clean
 
 ---
 
-## Step 8 — Docker Compose
-**Goal:** Replace the manual `docker run pg` / `docker run redis` from earlier steps with one declarative file. Add a one-shot `migrate` service that applies migrations on startup.
+## Step 8 — Docker Compose ✅ DONE
+**Goal:** Replace the manual `docker run pg` / `docker run redis` from earlier steps with one declarative file so a developer (or CI) brings up local infra with a single command.
 
-**No Go deps.**
+**Scope-adjustment from the original spec:**
+- Dropped the `migrate/migrate:latest` one-shot service. Our migrations are gormigrate (Go functions), not standalone SQL files, so the migrate runner *is* our binary. The "migrate as a compose service" naturally belongs in Step 9 where the app image lands — until then `mise run cli -- migrate` from the host is fine and matches the existing operator workflow.
+- Postgres credentials match `.env` (`postgres / postgres / go_db`) so host-side `mise run server` / `mise run worker` / `mise run cli` keep working against the compose-managed services through localhost — no env switch needed.
 
-**Files**
-- `docker-compose.yml`
-  - **postgres** — `postgres:16-alpine`, env `POSTGRES_USER=app`, `POSTGRES_PASSWORD=app`, `POSTGRES_DB=app`, named volume `pgdata:/var/lib/postgresql/data`, healthcheck `pg_isready -U app`, `5432:5432`.
-  - **redis** — `redis:7-alpine`, named volume `redisdata:/data`, healthcheck `redis-cli ping`, `6379:6379`.
-  - **migrate** — `migrate/migrate:latest`, mounts `./migrations:/migrations`, command `["-path=/migrations","-database=postgres://app:app@postgres:5432/app?sslmode=disable","up"]`, `depends_on: postgres (service_healthy)`, `restart: "no"` (one-shot).
-  - **asynqmon** *(optional, dev profile)* — `hibiken/asynqmon:latest`, `8081:8080`, `--redis-addr=redis:6379`. Web UI for poking at the queue.
-  - Volumes: `pgdata`, `redisdata`.
-- Update `.env` — change `DB_HOST=postgres` and `REDIS_ADDR=redis:6379` only when running inside compose; for local `go run` keep `localhost`. Easiest: keep `.env` for local dev, pass overrides via compose `environment:` block in Step 9.
+**Implemented:**
+- `docker-compose.yml` with:
+  - **postgres** — `postgres:16-alpine`, env from compose, `5432:5432`, `pgdata` volume, `pg_isready` healthcheck.
+  - **redis** — `redis:7-alpine`, `6379:6379`, `redisdata` volume, `redis-cli ping` healthcheck.
+  - **asynqmon** — `hibiken/asynqmon:latest` under `profiles: ["dev"]` so default `up` doesn't start it; binds `:8082` (not `:8081`, which collides with the API). Lets you poke pending / archived / retried tasks.
+- mise tasks: `infra` (`docker compose up -d`), `infra:dev` (with asynqmon), `infra:down` (stop, keep data).
+
+**Convention:** local dev = compose for infra + `mise run server/worker` for the Go binaries on the host. Containerizing the binaries themselves lands in Step 9 (then `DB_HOST=postgres`, `REDIS_ADDR=redis:6379` get set in each app service's `environment:` block, leaving `.env` for host-side runs).
 
 **Verify**
 ```bash
-docker compose down -v   # clean slate
-docker compose up -d postgres redis
-docker compose run --rm migrate   # applies 000001
-go run ./cmd/api                  # still works against compose-managed pg
+# Clean slate (wipes pgdata + redisdata)
+docker compose down -v
+
+# Bring up infra
+mise run infra                      # postgres + redis, both healthy
+# or: mise run infra:dev            # + asynqmon at http://localhost:8082
+
+mise run cli -- db_reset            # creates go_db, runs gormigrate
+mise run worker &
+mise run server &
+
+curl -X POST localhost:8081/users -H 'Content-Type: application/json' \
+     -d '{"email":"compose@test.com","name":"C"}'
+# → 201 + worker logs "welcome email sent"
+
+mise run infra:down                 # stop, keep volumes for next time
 ```
 
 ---

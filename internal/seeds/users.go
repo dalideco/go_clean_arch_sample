@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
+
 	"github.com/dali/go_project_sample/internal/usecase"
 )
 
@@ -14,12 +16,19 @@ var demoUsers = []struct{ Email, Name string }{
 	{"carol@example.com", "Carol"},
 }
 
+// nopWelcomeEmail is a no-op WelcomeEmailEnqueuer for seeds — demo emails
+// are fake, and a seed run shouldn't fill the queue with junk tasks the
+// worker would otherwise try to send.
+type nopWelcomeEmail struct{}
+
+func (nopWelcomeEmail) EnqueueWelcomeEmail(context.Context, uuid.UUID) error { return nil }
+
 func init() {
 	register(Seeder{
 		Name:   "users",
 		Tables: []string{"users"},
 		Run: func(ctx context.Context, repos usecase.Repositories) (int, error) {
-			uc := usecase.NewUserUseCase(repos.Users)
+			uc := usecase.NewUserUseCase(repos.Users, nopWelcomeEmail{})
 			n := 0
 			for _, d := range demoUsers {
 				// Look first, only insert on a real miss — avoids a noisy failed
