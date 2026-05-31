@@ -56,6 +56,21 @@ func (r *UserRepository) Get(ctx context.Context, id uuid.UUID) (*domain.User, e
 	return &u, nil
 }
 
+func (r *UserRepository) GetByEmail(ctx context.Context, email string) (*domain.User, error) {
+	var m userModel
+	if err := r.db.WithContext(ctx).First(&m, "email = ?", email).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, usecase.ErrUserNotFound
+		}
+		return nil, err
+	}
+	u, err := m.toDomain()
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
 func (r *UserRepository) Create(ctx context.Context, u *domain.User) error {
 	m := fromDomain(*u)
 	if err := r.db.WithContext(ctx).Create(&m).Error; err != nil {

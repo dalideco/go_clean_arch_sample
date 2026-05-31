@@ -10,6 +10,30 @@ import (
 	"github.com/dali/go_project_sample/internal/config"
 )
 
+// TruncateTables truncates the given tables in cfg.DBName with
+// RESTART IDENTITY CASCADE. Empty input is a no-op. Destructive — intended
+// for dev seed reset (`cli seed --reset`), not for any prod path.
+func TruncateTables(cfg *config.Config, tables []string) error {
+	if len(tables) == 0 {
+		return nil
+	}
+	db, err := New(cfg)
+	if err != nil {
+		return err
+	}
+	defer closeAdmin(db)
+
+	quoted := make([]string, len(tables))
+	for i, t := range tables {
+		quoted[i] = quoteIdent(t)
+	}
+	stmt := "TRUNCATE TABLE " + strings.Join(quoted, ", ") + " RESTART IDENTITY CASCADE"
+	if err := db.Exec(stmt).Error; err != nil {
+		return fmt.Errorf("truncate %v: %w", tables, err)
+	}
+	return nil
+}
+
 // DropDatabase drops cfg.DBName if it exists. Connects to the "postgres"
 // maintenance database because you can't drop the database you're currently
 // connected to.

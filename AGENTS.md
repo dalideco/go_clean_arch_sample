@@ -91,6 +91,14 @@ If a change would flip any of these, push back — that's a layering violation.
 6. Add `Foos FooRepository` to `usecase.Repositories` (`internal/usecase/repositories.go`) and `Foos: NewFooRepository(db)` to `postgres.NewRepositories` (`internal/adapter/repository/postgres/repositories.go`).
 7. `internal/adapter/http/router/foos.go` — `RegisterFoos(r gin.IRouter, repos usecase.Repositories)` constructs `usecase.NewFooUseCase(repos.Foos)` → `handler.NewFoosHandler(svc)` and mounts the routes. Add one line `RegisterFoos(engine, repos)` to `router.Register` in `router.go`. **`main.go` does not change.**
 8. `internal/adapter/repository/postgres/migrations/<YYYYMMDDHHMMSS>_<desc>.go` (timestamp via `date +%Y%m%d%H%M%S`) — an `init()` that calls `register(&gormigrate.Migration{...})` with the matching `"<YYYYMMDDHHMMSS>_<desc>"` ID and `Migrate`/`Rollback` funcs (use a *frozen* local struct, not the live model). The set of migrations is whatever files are in the directory — no central manifest to touch.
+9. `internal/seeds/foos.go` (optional, dev only) — an `init()` that calls `register("foos", func(ctx, repos) (int, error) { ... })`. Write through the use case (`usecase.NewFooUseCase(repos.Foos).Create(...)`), catch the entity's "already taken" sentinel for idempotency, never bypass into raw GORM.
+
+## Seeds convention
+
+- `internal/seeds/` holds dev/test seeders. Each entity gets one file that `init()`-registers a named `Seeder` (with the entity's `Tables`); no central manifest. Names must be unique within the package (collision panics at startup).
+- Seeders write **through the use case** — same domain factory + adapter chain as production traffic.
+- **Idempotency-by-pre-check:** each seeder *looks up* via the use case (e.g. `GetByEmail`) and only `Create`s on `ErrXxxNotFound`. Avoids a noisy failed INSERT on every re-seed; catches the unique-violation sentinel as belt-and-braces. No tracking table.
+- `cli seed` is the entrypoint, dev-only. No args runs every seeder; `cli seed <name>` targets one; `cli seed --list` enumerates them; `cli seed --reset` truncates the targeted seeders' `Tables` (RESTART IDENTITY CASCADE) before running — destructive: wipes API-created data in those tables too.
 
 ## Build / verify
 

@@ -194,30 +194,35 @@ curl -s localhost:8081/users   # → {"success":true,"users":[]} (table is back 
 
 ---
 
-## Step 5 — Seed Data
-**Goal:** A `cmd/seed` binary that idempotently inserts demo users.
+## Step 5 — Seeds ✅ DONE
+**Goal:** A `cli seed` command that idempotently inserts demo data, going through the use-case layer so seeds exercise the same domain factory + repository chain as production traffic. The original spec (`cmd/seed/main.go` with `domain.User{}` struct literals via raw GORM) predated the architecture work and was incompatible with three current rules — factories only, through-use-case writes, operator actions under `cmd/cli`.
 
-**No new deps** — uses GORM from Step 3.
+**Tool choice:** in-process sub-package `internal/seeds/` with self-registration via `init()`, mirroring the migrations pattern. No tracking table — idempotency comes from each entity's natural-key "taken" sentinel (`usecase.ErrUserEmailTaken` for users), which the seeder catches and skips.
 
-**Files**
-- `cmd/seed/main.go`
-  - Loads config + db, then:
-    ```go
-    users := []domain.User{
-        {Email: "alice@example.com", Name: "Alice"},
-        {Email: "bob@example.com",   Name: "Bob"},
-        {Email: "carol@example.com", Name: "Carol"},
-    }
-    db.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "email"}}, DoNothing: true}).
-       Create(&users)
-    ```
-  - Logs how many rows were inserted, exits 0.
+**Implemented:**
+- `internal/seeds/seeds.go` — `Seeder{Name, Run}` type, unexported `register(name, fn)` (panics on duplicate name), `All()`, `Find(name)`.
+- `internal/seeds/users.go` — `init()` registers `"users"` seeder with `Tables: []string{"users"}`. Constructs `usecase.NewUserUseCase(repos.Users)` and **pre-checks via `GetByEmail`** before calling `Create` so re-seeds don't spam the gormLogger with 23505 errors. The `ErrUserEmailTaken` catch on Create stays as belt-and-braces.
+- `cmd/cli/seed.go` — `cli seed` command. No args ⇒ run all in order; `cli seed <name>` ⇒ targeted; `cli seed --list` ⇒ print registered names; `cli seed --reset [name]` ⇒ truncate the targeted seeders' `Tables` (RESTART IDENTITY CASCADE) then run. Resolves target *before* opening the DB so typos don't burn a connection.
+- `internal/usecase/user.go` + `internal/adapter/repository/postgres/user_repository.go` — `GetByEmail(ctx, email) (*User, error)` added to support the seeder pre-check (and any future auth/lookup flow). `gorm.ErrRecordNotFound` → `usecase.ErrUserNotFound` at the boundary, same pattern as `Get(id)`.
+- `internal/adapter/repository/postgres/admin.go` — `TruncateTables(cfg, []string) error` for the `--reset` path.
+- `cmd/cli/main.go` — registers `seed` in the existing `EnvDev`-gated block (next to `db_setup`, `db_reset`, `generate_migration`).
+
+**Why not under `internal/adapter/repository/postgres/`?** Seeds speak `usecase.Repositories` (an interface), not `*gorm.DB`. Putting them under postgres would falsely couple them to the current adapter — `internal/seeds/` is the application-data home.
 
 **Verify**
 ```bash
-go run ./cmd/seed
-curl -s localhost:8080/users | jq 'length'   # → 3
-go run ./cmd/seed                            # idempotent — still 3
+mise run cli -- db_reset
+mise run cli -- seed --list                                  # → users
+mise run cli -- seed users                                   # → inserted=3
+mise run cli -- seed users                                   # → inserted=0 (additive default, no SQL errors)
+mise run cli -- seed users --reset                           # WRN truncating + inserted=3
+mise run cli -- seed nope                                    # → Error: unknown seeder "nope"
+
+mise run server &
+curl -s localhost:8081/users | jq '.users | length'          # → 3
+pkill -f "go run ./cmd/api"
+
+APP_ENV=prod go run ./cmd/cli seed                           # → unknown command "seed"
 ```
 
 ---

@@ -17,6 +17,7 @@ var (
 type UserRepository interface {
 	List(ctx context.Context) ([]domain.User, error)
 	Get(ctx context.Context, id uuid.UUID) (*domain.User, error)
+	GetByEmail(ctx context.Context, email string) (*domain.User, error)
 	Create(ctx context.Context, u *domain.User) error
 }
 
@@ -34,6 +35,10 @@ func (s *UserUseCase) List(ctx context.Context) ([]domain.User, error) {
 
 func (s *UserUseCase) Get(ctx context.Context, id uuid.UUID) (*domain.User, error) {
 	return s.repo.Get(ctx, id)
+}
+
+func (s *UserUseCase) GetByEmail(ctx context.Context, email string) (*domain.User, error) {
+	return s.repo.GetByEmail(ctx, email)
 }
 
 func (s *UserUseCase) Create(ctx context.Context, email, name string) (*domain.User, error) {

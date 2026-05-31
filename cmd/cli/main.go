@@ -73,6 +73,7 @@ func main() {
 		rootCmd.AddCommand(newDBSetupCmd(cfg))
 		rootCmd.AddCommand(newDBResetCmd(cfg))
 		rootCmd.AddCommand(newGenerateMigrationCmd(cfg))
+		rootCmd.AddCommand(newSeedCmd(cfg))
 	}
 
 	if err := rootCmd.Execute(); err != nil {
