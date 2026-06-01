@@ -375,43 +375,8 @@ docker compose logs worker                   # shows the welcome-email log line
 
 ---
 
-## Step 10 — Makefile
-**Goal:** One-line commands for the most common workflows.
-
-**Files**
-- `Makefile`
-  ```makefile
-  .PHONY: up down logs migrate-up migrate-down migrate-create seed run-api run-worker tidy
-
-  up:        ; docker compose up -d --build
-  down:      ; docker compose down
-  logs:      ; docker compose logs -f api worker
-  seed:      ; docker compose run --rm api /usr/local/bin/seed   # add a seed target to Dockerfile if needed
-  run-api:   ; go run ./cmd/api
-  run-worker:; go run ./cmd/worker
-  tidy:      ; go mod tidy
-
-  migrate-up:
-  	docker run --rm -v $(PWD)/migrations:/migrations --network host \
-  	  migrate/migrate -path=/migrations \
-  	  -database "postgres://app:app@localhost:5432/app?sslmode=disable" up
-
-  migrate-down:
-  	docker run --rm -v $(PWD)/migrations:/migrations --network host \
-  	  migrate/migrate -path=/migrations \
-  	  -database "postgres://app:app@localhost:5432/app?sslmode=disable" down 1
-
-  migrate-create:
-  	docker run --rm -v $(PWD)/migrations:/migrations \
-  	  migrate/migrate create -ext sql -dir /migrations -seq $(name)
-  ```
-
-**Verify:** `make up && make logs` works end-to-end. `make migrate-create name=add_posts_table` writes a new pair of empty migration files.
-
----
-
-## Step 11 — End-to-End Smoke Test
-Run after Step 10 to confirm everything is wired together.
+## Step 10 — End-to-End Smoke Test
+Run after Step 9 to confirm everything is wired together.
 
 ```bash
 docker compose down -v        # clean slate
@@ -431,7 +396,7 @@ make down                     # tear down (keep volumes); add `-v` to nuke data
 
 ---
 
-## Step 12 — Observability
+## Step 11 — Observability
 **Goal:** When something is slow or failing in prod, you can attribute it. Request correlation IDs threaded through every log line, Prometheus metrics for HTTP traffic, OpenTelemetry traces, and `pprof` for live diagnostics.
 
 **Deps**
@@ -459,7 +424,7 @@ go get go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp
 
 ---
 
-## Step 13 — Operational Hardening
+## Step 12 — Operational Hardening
 **Goal:** Survive real-world conditions — slow downstreams, transient failures, concurrent deploys, abusive clients. Mostly small middlewares + boot-time changes.
 
 **Deps**
@@ -503,5 +468,5 @@ mise run cli -- migrate & mise run cli -- migrate &   # one waits on the advisor
 ---
 
 ## Out of Scope (add later when needed)
-- Auth (JWT / session / OIDC / mTLS) — Step 13 flags it; design is deployment-specific.
+- Auth (JWT / session / OIDC / mTLS) — Step 12 flags it; design is deployment-specific.
 - Real SMTP for the welcome email — handler currently just logs.

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"sort"
 
@@ -62,30 +63,41 @@ Use --reset to truncate the targeted seeders' tables before running (destructive
 				}
 			}
 
-			db, err := postgres.New(cfg)
-			if err != nil {
-				return err
-			}
-			defer func() {
-				if sqlDB, err := db.DB(); err == nil {
-					_ = sqlDB.Close()
-				}
-			}()
-			repos := postgres.NewRepositories(db)
-
-			for _, s := range targets {
-				n, err := s.Run(cmd.Context(), repos)
-				if err != nil {
-					return fmt.Errorf("seed %s: %w", s.Name, err)
-				}
-				log.Info("seed: applied", "name", s.Name, "inserted", n)
-			}
-			return nil
+			return runSeeders(cmd.Context(), cfg, targets)
 		},
 	}
 	cmd.Flags().BoolVar(&list, "list", false, "Print registered seeder names and exit")
 	cmd.Flags().BoolVar(&reset, "reset", false, "Truncate the targeted seeders' tables before running (destructive)")
 	return cmd
+}
+
+// runSeeders opens the DB once, builds repositories, and runs the given
+// seeders in order. Shared by the `seed` command and `db_setup` (which
+// runs all seeders after migrations as part of bringing the DB to a
+// usable state). No-op on an empty target list.
+func runSeeders(ctx context.Context, cfg *config.Config, targets []seeds.Seeder) error {
+	if len(targets) == 0 {
+		return nil
+	}
+	db, err := postgres.New(cfg)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if sqlDB, err := db.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+	}()
+	repos := postgres.NewRepositories(db)
+
+	for _, s := range targets {
+		n, err := s.Run(ctx, repos)
+		if err != nil {
+			return fmt.Errorf("seed %s: %w", s.Name, err)
+		}
+		log.Info("seed: applied", "name", s.Name, "inserted", n)
+	}
+	return nil
 }
 
 // targetTables returns the deduplicated, sorted union of Tables across the

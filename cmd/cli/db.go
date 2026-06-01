@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
+
 	"github.com/spf13/cobra"
 
 	"github.com/dali/go_project_sample/internal/adapter/repository/postgres"
 	"github.com/dali/go_project_sample/internal/config"
 	"github.com/dali/go_project_sample/internal/log"
+	"github.com/dali/go_project_sample/internal/seeds"
 )
 
 // newDBSetupCmd brings the database to a usable state. Today that's just
@@ -43,6 +46,13 @@ func runDBSetup(cfg *config.Config) error {
 		return err
 	}
 	if err := postgres.Migrate(cfg); err != nil {
+		return err
+	}
+	// Apply every registered seeder so a fresh DB lands in a usable demo
+	// state — matches the Rails `db:setup` / Phoenix `ecto.setup` convention
+	// ("create + migrate + seed"). Seeders are idempotent, so this is also
+	// safe when run on an already-seeded DB (e.g. via db_reset).
+	if err := runSeeders(context.Background(), cfg, seeds.All()); err != nil {
 		return err
 	}
 	log.Info("db_setup: database ready", "db", cfg.DBName)

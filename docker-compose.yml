@@ -17,8 +17,12 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: go_db
+    # Host port comes from .env (DB_PORT); container port stays 5432 so the
+    # image's defaults Just Work. Set DB_PORT=5433 (or whatever's free) in
+    # .env if you already have a Postgres on 5432, and the app reads the
+    # same value to connect — host port + app config stay in sync.
     ports:
-      - "5432:5432"
+      - "${DB_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

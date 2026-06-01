@@ -32,3 +32,11 @@ run = "docker compose --profile dev up -d"
 [tasks."infra:down"]
 description = "Stop local infra (keep data)"
 run = "docker compose down"
+
+[tasks."infra:logs"]
+description = "Tail logs from the compose services"
+run = "docker compose logs -f"
+
+[tasks.tidy]
+description = "Tidy go.mod / go.sum"
+run = "go mod tidy"
