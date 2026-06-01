@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"time"
@@ -15,21 +14,11 @@ import (
 	"github.com/dali/go_project_sample/internal/usecase"
 )
 
-// userUseCase is the handler-side view of UserUseCase. Declaring the
-// interface here (consumer side) keeps the handler unbound from the
-// concrete use-case struct so tests can inject a fake without touching DB.
-// *usecase.UserUseCase satisfies this via structural typing.
-type userUseCase interface {
-	List(ctx context.Context) ([]domain.User, error)
-	Get(ctx context.Context, id uuid.UUID) (*domain.User, error)
-	Create(ctx context.Context, email, name string) (*domain.User, error)
-}
-
 type UsersHandler struct {
-	uc userUseCase
+	uc *usecase.UserUseCase
 }
 
-func NewUsersHandler(uc userUseCase) *UsersHandler {
+func NewUsersHandler(uc *usecase.UserUseCase) *UsersHandler {
 	return &UsersHandler{uc: uc}
 }
 
