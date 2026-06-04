@@ -1,0 +1,38 @@
+# golangci-lint config — the Go analog of Elixir's `credo`.
+# `mise run lint` is the local entrypoint; CI runs the same task.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - revive
+    - unused
+    - gocritic
+    - gosec
+    - ineffassign
+  settings:
+    revive:
+      rules:
+        # Doc-comment-on-every-exported-thing is too noisy for internal
+        # packages; the type/func names are self-documenting. We still keep
+        # comments where the *why* is non-obvious.
+        - name: exported
+          disabled: true
+        - name: package-comments
+          disabled: true
+  exclusions:
+    rules:
+      # Tests routinely ignore Close() errors and use predictable randomness.
+      - path: _test\.go
+        linters: [gosec, errcheck]
+      # Frozen migration structs are "unused" by design — they exist only to
+      # snapshot a past schema for gormigrate.
+      - path: internal/adapter/repository/postgres/migrations/
+        linters: [unused]
+
+formatters:
+  enable:
+    - gofmt
