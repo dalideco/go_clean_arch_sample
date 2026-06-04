@@ -5,8 +5,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/dali/go_project_sample/internal/adapter/http/response"
-	"github.com/dali/go_project_sample/internal/log"
+	"github.com/dali/go_clean_arch_sample/internal/adapter/http/response"
+	"github.com/dali/go_clean_arch_sample/internal/log"
 )
 
 func Recovery() gin.HandlerFunc {

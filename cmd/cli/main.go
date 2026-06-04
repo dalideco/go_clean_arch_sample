@@ -44,14 +44,14 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dali/go_project_sample/internal/config"
-	"github.com/dali/go_project_sample/internal/log"
+	"github.com/dali/go_clean_arch_sample/internal/config"
+	"github.com/dali/go_clean_arch_sample/internal/log"
 )
 
 var rootCmd = &cobra.Command{
 	Use:   "cli",
-	Short: "Operator CLI for go_project_sample",
-	Long: `Operator CLI for go_project_sample.
+	Short: "Operator CLI for go_clean_arch_sample",
+	Long: `Operator CLI for go_clean_arch_sample.
 
 Each subcommand wraps an internal/usecase function so domain logic is
 reachable both from HTTP handlers and from this command line. See the

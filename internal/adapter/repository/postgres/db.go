@@ -6,7 +6,7 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
-	"github.com/dali/go_project_sample/internal/config"
+	"github.com/dali/go_clean_arch_sample/internal/config"
 )
 
 func New(cfg *config.Config) (*gorm.DB, error) {

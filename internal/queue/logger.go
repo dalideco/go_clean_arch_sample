@@ -5,7 +5,7 @@ import (
 
 	"github.com/hibiken/asynq"
 
-	"github.com/dali/go_project_sample/internal/log"
+	"github.com/dali/go_clean_arch_sample/internal/log"
 )
 
 // asynqLogger bridges asynq's printf-style Logger interface to internal/log.

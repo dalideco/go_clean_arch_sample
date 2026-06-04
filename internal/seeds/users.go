@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/dali/go_project_sample/internal/usecase"
+	"github.com/dali/go_clean_arch_sample/internal/usecase"
 )
 
 var demoUsers = []struct{ Email, Name string }{

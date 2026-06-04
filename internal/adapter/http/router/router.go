@@ -3,8 +3,8 @@ package router
 import (
 	"github.com/gin-gonic/gin"
 
-	"github.com/dali/go_project_sample/internal/adapter/http/handler"
-	"github.com/dali/go_project_sample/internal/usecase"
+	"github.com/dali/go_clean_arch_sample/internal/adapter/http/handler"
+	"github.com/dali/go_clean_arch_sample/internal/usecase"
 )
 
 // Register mounts all HTTP routes on engine. Add one line per feature —

@@ -1,9 +1,9 @@
 # Go Project Scaffold — Step-by-Step Build Plan
 
 ## Context
-Greenfield project at `/Users/dali/Documents/GitHub/projects/go_project_sample`. Goal: build up a Gin API + Postgres + Asynq worker stack incrementally — each step adds one capability, installs only the libraries it needs, and ends in a runnable, verifiable state. By the time you finish, you'll have a `users` resource where `POST /users` writes to Postgres and enqueues an async "welcome email" job that the worker consumes from Redis.
+Greenfield project at `/Users/dali/Documents/GitHub/projects/go_clean_arch_sample`. Goal: build up a Gin API + Postgres + Asynq worker stack incrementally — each step adds one capability, installs only the libraries it needs, and ends in a runnable, verifiable state. By the time you finish, you'll have a `users` resource where `POST /users` writes to Postgres and enqueues an async "welcome email" job that the worker consumes from Redis.
 
-Module path: `github.com/dali/go_project_sample`.
+Module path: `github.com/dali/go_clean_arch_sample`.
 
 Stack picks: **Gin** for HTTP, **GORM** for the ORM, **gormigrate** for versioned migrations (GORM-native), **Asynq** for the worker.
 
@@ -51,9 +51,9 @@ internal/
 
 **Commands**
 ```bash
-cd /Users/dali/Documents/GitHub/projects/go_project_sample
+cd /Users/dali/Documents/GitHub/projects/go_clean_arch_sample
 git init
-go mod init github.com/dali/go_project_sample
+go mod init github.com/dali/go_clean_arch_sample
 ```
 
 **Files**
@@ -266,8 +266,22 @@ pkill -f "go run ./cmd/(api|worker)"
 
 ---
 
-## Step 7 — Tests + Linting + CI
-**Goal:** Quality gates so future changes don't silently regress. Tests at every layer (domain → use case → handler → integration), a lint stack as the Go equivalent of Elixir's `credo`, and a CI workflow that runs both on every push. Currently the codebase has zero automated tests — this is the highest-leverage step left before shipping anything.
+## Step 7 — Tests + Linting + CI ✅ DONE
+**Goal:** Quality gates so future changes don't silently regress. Tests at every layer (domain → use case → handler → integration), a lint stack as the Go equivalent of Elixir's `credo`, and a CI workflow that runs both on every push.
+
+**Implemented:**
+- **Lint (the credo equivalent):** `golangci-lint` via mise tools; `.golangci.yml` enables `govet`, `staticcheck`, `errcheck`, `revive`, `unused`, `gocritic`, `gosec`, `gofmt`, `ineffassign`. Revive's "comment on every exported symbol" rules disabled — they were noise on a small internal codebase. First lint pass surfaced real findings: errcheck on user-stdout writes, `exitAfterDefer` on `log.Fatal` paths (annotated as intentional), missing `ReadHeaderTimeout` on the http.Server (Slowloris mitigation added), `gosec G306` on the migration scaffolder (annotated — dev-only). All real findings fixed; lint is now clean.
+- **Tests at every layer (~40 assertions across 5 files):**
+  - `internal/domain/user_test.go` — table tests for `NewUser` invariants (8 cases including accumulating both-field violations), trim behaviour, happy path, `ReconstituteUser` drift detection.
+  - `internal/usecase/user_test.go` — hand-written `fakeUserRepository` + `fakeWelcomeEmailEnqueuer`; tests Create happy path, invalid email (no repo/enqueue side effects), `ErrUserEmailTaken` propagation, **enqueue failure does not fail Create** (the documented "log + continue" contract), and Get/GetByEmail/List delegation.
+  - `internal/adapter/http/handler/users_test.go` — `httptest` driving a real `*UserUseCase` (confirming the decision to drop the local interface was testable). Asserts envelope shape and status code per branch — happy POST, duplicate (409), malformed JSON, `{}` (details for both fields), bad email format, repo failure (500), list happy/empty/failure, get happy/404/bad-uuid.
+  - `internal/adapter/http/response/response_test.go` — `ValidationDetails` over `*domain.ValidationError`, `validator.ValidationErrors`, wrapped errors, plain errors. `RegisterFieldNames` proves the binding errors honor JSON tags (not Go struct names).
+  - `internal/adapter/repository/postgres/user_repository_test.go` — `dockertest` spins up `postgres:16-alpine`, applies `Migrate` (exercises the real migration code), runs CRUD + the `pgconn 23505 → ErrUserEmailTaken` translation + the reconstitution-on-drift path (insert malformed row via raw SQL, expect `*ValidationError` on `Get`). Auto-discovers the Docker socket across `/var/run/docker.sock` (Linux/CI), `~/.docker/run/docker.sock` (macOS Desktop), and `$DOCKER_HOST`. Gated by `testing.Short()` so unit-only runs stay <2s.
+- **mise tasks:** `lint`, `test`, `test:short`, `check` (composite: lint + short tests).
+- **CI** `.github/workflows/ci.yml`: three independent jobs — `lint`, `test-unit` (`-short`), `test-integration` (full). `jdx/mise-action@v2` installs Go + golangci-lint from `mise.toml`. Go module cache shared across jobs.
+- **AGENTS.md** gains a "Tests + lint conventions" section: per-entity coverage expectations, fakes hand-written until shared, integration tests gated by `testing.Short()`, `mise run check` as the pre-push gate.
+
+**Final invariant check:** `grep "^type [A-Za-z]\+ interface " internal/` still returns only `usecase.UserRepository` + `usecase.WelcomeEmailEnqueuer`. No test-only interfaces leaked into source.
 
 **Deps**
 ```bash

@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dali/go_project_sample/internal/config"
-	"github.com/dali/go_project_sample/internal/log"
+	"github.com/dali/go_clean_arch_sample/internal/config"
+	"github.com/dali/go_clean_arch_sample/internal/log"
 )
 
 // migrationsDir is the path (relative to the repo root) where new migration
@@ -55,7 +55,9 @@ func runGenerateMigration(name string) error {
 		return fmt.Errorf("file already exists: %s", path)
 	}
 
-	if err := os.WriteFile(path, []byte(scaffoldMigration(id)), 0o644); err != nil {
+	// 0o644 is appropriate for a checked-in source file; this CLI is dev-only
+	// and writes into the repo working tree.
+	if err := os.WriteFile(path, []byte(scaffoldMigration(id)), 0o644); err != nil { //nolint:gosec // dev-only scaffold writing into the repo
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 	log.Info("generated migration", "path", path, "id", id)

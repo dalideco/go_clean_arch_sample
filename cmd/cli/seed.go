@@ -7,10 +7,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dali/go_project_sample/internal/adapter/repository/postgres"
-	"github.com/dali/go_project_sample/internal/config"
-	"github.com/dali/go_project_sample/internal/log"
-	"github.com/dali/go_project_sample/internal/seeds"
+	"github.com/dali/go_clean_arch_sample/internal/adapter/repository/postgres"
+	"github.com/dali/go_clean_arch_sample/internal/config"
+	"github.com/dali/go_clean_arch_sample/internal/log"
+	"github.com/dali/go_clean_arch_sample/internal/seeds"
 )
 
 // newSeedCmd applies dev/test seed data. Dev-only because demo records must
@@ -38,7 +38,9 @@ Use --reset to truncate the targeted seeders' tables before running (destructive
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if list {
 				for _, s := range seeds.All() {
-					fmt.Fprintln(cmd.OutOrStdout(), s.Name)
+					if _, err := fmt.Fprintln(cmd.OutOrStdout(), s.Name); err != nil {
+						return err
+					}
 				}
 				return nil
 			}

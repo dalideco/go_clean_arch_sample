@@ -1,6 +1,6 @@
 # Architecture — package dependency graph
 
-Arrows mean **"imports / depends on"**. Every edge points inward toward `internal/domain`, which depends on nothing internal. Regenerate by re-auditing imports (`grep -rhoE '"github.com/dali/go_project_sample/[^"]+"' <pkg>`).
+Arrows mean **"imports / depends on"**. Every edge points inward toward `internal/domain`, which depends on nothing internal. Regenerate by re-auditing imports (`grep -rhoE '"github.com/dali/go_clean_arch_sample/[^"]+"' <pkg>`).
 
 ```mermaid
 graph TD

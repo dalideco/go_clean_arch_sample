@@ -15,7 +15,7 @@ import (
 	"github.com/gin-gonic/gin/binding"
 	"github.com/go-playground/validator/v10"
 
-	"github.com/dali/go_project_sample/internal/domain"
+	"github.com/dali/go_clean_arch_sample/internal/domain"
 )
 
 // FieldError is one invalid field in an error response. Message is

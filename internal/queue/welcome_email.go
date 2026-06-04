@@ -9,8 +9,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 
-	"github.com/dali/go_project_sample/internal/log"
-	"github.com/dali/go_project_sample/internal/usecase"
+	"github.com/dali/go_clean_arch_sample/internal/log"
+	"github.com/dali/go_clean_arch_sample/internal/usecase"
 )
 
 // TypeWelcomeEmail is the asynq task name for the welcome-email job.
@@ -33,7 +33,7 @@ func (c *Client) EnqueueWelcomeEmail(ctx context.Context, userID uuid.UUID) erro
 		return fmt.Errorf("marshal welcome email payload: %w", err)
 	}
 	task := asynq.NewTask(TypeWelcomeEmail, payload)
-	if _, err := c.c.EnqueueContext(ctx, task); err != nil {
+	if _, err := c.c.EnqueueContext(ctx, task, asynq.Queue(QueueEmails)); err != nil {
 		return fmt.Errorf("enqueue %s: %w", TypeWelcomeEmail, err)
 	}
 	return nil
@@ -42,9 +42,10 @@ func (c *Client) EnqueueWelcomeEmail(ctx context.Context, userID uuid.UUID) erro
 // -- Consumer side ------------------------------------------------------
 
 // WelcomeEmailHandler processes welcome-email tasks: looks up the user and
-// (today) logs the send. Swapping the log for real SMTP is a one-line
-// change. Depends on usecase.UserRepository directly — read-only lookups
-// don't need the full UserUseCase or its write-side producers.
+// (today) logs that it *would* send the email — actual delivery isn't
+// implemented yet. Wiring real SMTP is a one-line change at the send site.
+// Depends on usecase.UserRepository directly — read-only lookups don't need
+// the full UserUseCase or its write-side producers.
 type WelcomeEmailHandler struct {
 	users usecase.UserRepository
 }
@@ -73,6 +74,9 @@ func (h *WelcomeEmailHandler) Handle(ctx context.Context, t *asynq.Task) error {
 		return fmt.Errorf("lookup user %s: %w", payload.UserID, err)
 	}
 
-	log.Info("welcome email sent", "to", u.Email, "user_id", u.ID)
+	// TODO: wire real email delivery (SMTP / provider API) here. For now we
+	// only log the intent so the async path stays observable end-to-end.
+	log.Info("welcome email: delivery not implemented yet, would send",
+		"to", u.Email, "user_id", u.ID)
 	return nil
 }

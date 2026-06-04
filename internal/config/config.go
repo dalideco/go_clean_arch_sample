@@ -7,7 +7,7 @@ import (
 
 	"github.com/joho/godotenv"
 
-	"github.com/dali/go_project_sample/internal/log"
+	"github.com/dali/go_clean_arch_sample/internal/log"
 )
 
 type Env int
@@ -131,4 +131,3 @@ func mustGetenv(key string) string {
 	}
 	return v
 }
-

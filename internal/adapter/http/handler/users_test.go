@@ -2,7 +2,6 @@ package handler
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -15,88 +14,23 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dali/go_project_sample/internal/adapter/http/response"
-	"github.com/dali/go_project_sample/internal/domain"
-	"github.com/dali/go_project_sample/internal/usecase"
+	"github.com/dali/go_clean_arch_sample/internal/adapter/http/response"
+	"github.com/dali/go_clean_arch_sample/internal/domain"
+	"github.com/dali/go_clean_arch_sample/internal/usecase"
+	"github.com/dali/go_clean_arch_sample/internal/usecase/testfakes"
 )
 
-// Fakes are duplicated from internal/usecase/user_test.go on purpose:
-// shared testfakes would create a circular import (testfakes → usecase →
-// testfakes when usecase's own tests use them). When/if a third consumer
-// appears, we'll promote to internal/usecase/testfakes and move the
-// usecase tests to an external `usecase_test` package.
-
-type fakeUserRepository struct {
-	users     map[uuid.UUID]domain.User
-	listErr   error
-	getErr    error
-	createErr error
-}
-
-func newFakeUserRepository() *fakeUserRepository {
-	return &fakeUserRepository{users: map[uuid.UUID]domain.User{}}
-}
-
-func (r *fakeUserRepository) List(_ context.Context) ([]domain.User, error) {
-	if r.listErr != nil {
-		return nil, r.listErr
-	}
-	out := make([]domain.User, 0, len(r.users))
-	for _, u := range r.users {
-		out = append(out, u)
-	}
-	return out, nil
-}
-
-func (r *fakeUserRepository) Get(_ context.Context, id uuid.UUID) (*domain.User, error) {
-	if r.getErr != nil {
-		return nil, r.getErr
-	}
-	u, ok := r.users[id]
-	if !ok {
-		return nil, usecase.ErrUserNotFound
-	}
-	return &u, nil
-}
-
-func (r *fakeUserRepository) GetByEmail(_ context.Context, email string) (*domain.User, error) {
-	for _, u := range r.users {
-		if u.Email == email {
-			return &u, nil
-		}
-	}
-	return nil, usecase.ErrUserNotFound
-}
-
-func (r *fakeUserRepository) Create(_ context.Context, u *domain.User) error {
-	if r.createErr != nil {
-		return r.createErr
-	}
-	for _, existing := range r.users {
-		if existing.Email == u.Email {
-			return usecase.ErrUserEmailTaken
-		}
-	}
-	r.users[u.ID] = *u
-	return nil
-}
-
-type fakeWelcomeEmailEnqueuer struct{}
-
-func (fakeWelcomeEmailEnqueuer) EnqueueWelcomeEmail(_ context.Context, _ uuid.UUID) error {
-	return nil
-}
-
-// newTestEngine wires a real *UserUseCase (with fakes) into a gin engine
-// with the same routes the production router registers. This is the seam
-// we rely on instead of the now-removed handler-side userUseCase interface.
-func newTestEngine(t *testing.T) (*gin.Engine, *fakeUserRepository) {
+// newTestEngine wires a real *UserUseCase (with shared testfakes) into a gin
+// engine with the same routes the production router registers. This is the
+// seam we rely on instead of the now-removed handler-side userUseCase
+// interface.
+func newTestEngine(t *testing.T) (*gin.Engine, *testfakes.FakeUserRepository) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	response.RegisterFieldNames() // idempotent
 
-	repo := newFakeUserRepository()
-	uc := usecase.NewUserUseCase(repo, fakeWelcomeEmailEnqueuer{})
+	repo := testfakes.NewFakeUserRepository()
+	uc := usecase.NewUserUseCase(repo, &testfakes.FakeWelcomeEmailEnqueuer{})
 	h := NewUsersHandler(uc)
 
 	engine := gin.New()
@@ -143,7 +77,7 @@ func TestCreate_HappyPath(t *testing.T) {
 	assert.Equal(t, "alice@example.com", user["email"])
 	assert.Equal(t, "Alice", user["name"])
 	assert.NotEmpty(t, user["id"])
-	assert.Len(t, repo.users, 1)
+	assert.Len(t, repo.Users, 1)
 }
 
 func TestCreate_DuplicateEmail(t *testing.T) {
@@ -209,7 +143,7 @@ func TestCreate_BindingEmailMessage(t *testing.T) {
 
 func TestCreate_RepoFailure_500(t *testing.T) {
 	engine, repo := newTestEngine(t)
-	repo.createErr = errors.New("db connection lost")
+	repo.CreateErr = errors.New("db connection lost")
 
 	rec := post(t, engine, `{"email":"alice@example.com","name":"Alice"}`)
 
@@ -221,8 +155,9 @@ func TestCreate_RepoFailure_500(t *testing.T) {
 
 func TestList_Happy(t *testing.T) {
 	engine, repo := newTestEngine(t)
-	repo.users[uuid.New()] = domain.User{ID: uuid.New(), Email: "a@example.com", Name: "A"}
-	repo.users[uuid.New()] = domain.User{ID: uuid.New(), Email: "b@example.com", Name: "B"}
+	idA, idB := uuid.New(), uuid.New()
+	repo.Users[idA] = domain.User{ID: idA, Email: "a@example.com", Name: "A"}
+	repo.Users[idB] = domain.User{ID: idB, Email: "b@example.com", Name: "B"}
 
 	rec := get(t, engine, "/users")
 
@@ -247,7 +182,7 @@ func TestList_Empty(t *testing.T) {
 
 func TestList_RepoFailure_500(t *testing.T) {
 	engine, repo := newTestEngine(t)
-	repo.listErr = errors.New("db down")
+	repo.ListErr = errors.New("db down")
 
 	rec := get(t, engine, "/users")
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
@@ -256,7 +191,7 @@ func TestList_RepoFailure_500(t *testing.T) {
 func TestGet_Happy(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	id := uuid.New()
-	repo.users[id] = domain.User{ID: id, Email: "alice@example.com", Name: "Alice"}
+	repo.Users[id] = domain.User{ID: id, Email: "alice@example.com", Name: "Alice"}
 
 	rec := get(t, engine, "/users/"+id.String())
 

@@ -1,9 +1,9 @@
 // Package queue is the single asynq + Redis adapter. It owns both the
-// producer side (Client + Enqueue methods, used by the API binary) and the
-// consumer side (handlers + asynq.Logger bridge, used by the worker
-// binary). Tasks are grouped per-file: each task type's payload + name
-// const + Client.EnqueueXxx + XxxHandler live together so a feature is one
-// file, not three packages.
+// producer side (Client + Enqueue methods) and the consumer side (Server +
+// handlers + asynq.Logger bridge). Both run in the same process — the worker
+// is embedded in cmd/api, there is no standalone worker binary. Tasks are
+// grouped per-file: each task type's payload + name const + Client.EnqueueXxx
+// + XxxHandler live together so a feature is one file, not three packages.
 //
 // The package replaces the earlier three-way split (internal/tasks +
 // internal/adapter/queue + internal/adapter/worker). Producer and consumer
@@ -15,8 +15,8 @@ package queue
 import (
 	"github.com/hibiken/asynq"
 
-	"github.com/dali/go_project_sample/internal/config"
-	"github.com/dali/go_project_sample/internal/usecase"
+	"github.com/dali/go_clean_arch_sample/internal/config"
+	"github.com/dali/go_clean_arch_sample/internal/usecase"
 )
 
 // Client wraps *asynq.Client. The only place in the codebase that opens an

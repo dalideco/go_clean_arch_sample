@@ -14,7 +14,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/dali/go_project_sample/internal/usecase"
+	"github.com/dali/go_clean_arch_sample/internal/usecase"
 )
 
 // Seeder is a named, idempotent population step. Run reports how many

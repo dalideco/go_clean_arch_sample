@@ -5,16 +5,15 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dali/go_project_sample/internal/adapter/repository/postgres"
-	"github.com/dali/go_project_sample/internal/config"
-	"github.com/dali/go_project_sample/internal/log"
-	"github.com/dali/go_project_sample/internal/seeds"
+	"github.com/dali/go_clean_arch_sample/internal/adapter/repository/postgres"
+	"github.com/dali/go_clean_arch_sample/internal/config"
+	"github.com/dali/go_clean_arch_sample/internal/log"
+	"github.com/dali/go_clean_arch_sample/internal/seeds"
 )
 
-// newDBSetupCmd brings the database to a usable state. Today that's just
-// "create the database if it doesn't exist"; migrations (Step 4) and seed
-// (Step 5) will be added here when they land. Dev-only — registered
-// conditionally from main() based on cfg.Env.
+// newDBSetupCmd brings the database to a usable state: create the database if
+// it doesn't exist, run migrations, then apply seeds (see runDBSetup).
+// Dev-only — registered conditionally from main() based on cfg.Env.
 func newDBSetupCmd(cfg *config.Config) *cobra.Command {
 	return &cobra.Command{
 		Use:   "db_setup",

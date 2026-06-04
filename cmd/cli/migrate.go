@@ -5,9 +5,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dali/go_project_sample/internal/adapter/repository/postgres"
-	"github.com/dali/go_project_sample/internal/config"
-	"github.com/dali/go_project_sample/internal/log"
+	"github.com/dali/go_clean_arch_sample/internal/adapter/repository/postgres"
+	"github.com/dali/go_clean_arch_sample/internal/config"
+	"github.com/dali/go_clean_arch_sample/internal/log"
 )
 
 // newMigrateCmd exposes the migration runner as a CLI command. Unlike
@@ -48,7 +48,9 @@ func newMigrateStatusCmd(cfg *config.Config) *cobra.Command {
 				case s.Applied:
 					state = "APPLIED"
 				}
-				fmt.Fprintf(out, "%-7s  %s\n", state, s.ID)
+				if _, err := fmt.Fprintf(out, "%-7s  %s\n", state, s.ID); err != nil {
+					return err
+				}
 			}
 			return nil
 		},

@@ -6,8 +6,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/dali/go_project_sample/internal/domain"
-	"github.com/dali/go_project_sample/internal/log"
+	"github.com/dali/go_clean_arch_sample/internal/domain"
+	"github.com/dali/go_clean_arch_sample/internal/log"
 )
 
 var (
@@ -24,8 +24,8 @@ type UserRepository interface {
 
 // WelcomeEmailEnqueuer is the consumer-defined interface for queuing a
 // welcome-email task after user creation. The queue adapter
-// (internal/adapter/queue) implements it; tests may pass a fake. The use
-// case knows nothing about asynq, Redis, or the task payload format.
+// (internal/queue) implements it; tests may pass a fake. The use case knows
+// nothing about asynq, Redis, or the task payload format.
 type WelcomeEmailEnqueuer interface {
 	EnqueueWelcomeEmail(ctx context.Context, userID uuid.UUID) error
 }

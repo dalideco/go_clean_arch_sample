@@ -1,12 +1,13 @@
 [tools]
 go = "1.25.0"
 "go:github.com/go-delve/delve/cmd/dlv" = "latest"
+"go:github.com/golangci/golangci-lint/v2/cmd/golangci-lint" = "latest"
 
 [env]
 _.file = ".env"
 
 [tasks.server]
-description = "Run the API server"
+description = "Run the API server (with the embedded asynq worker)"
 run = "go run ./cmd/api"
 
 [tasks.console]
@@ -16,10 +17,6 @@ run = "dlv debug ./cmd/api"
 [tasks.cli]
 description = "Run the operator CLI (pass subcommand args after --)"
 run = "go run ./cmd/cli"
-
-[tasks.worker]
-description = "Run the asynq worker"
-run = "go run ./cmd/worker"
 
 [tasks.infra]
 description = "Bring up local Postgres + Redis via docker compose"
@@ -40,3 +37,19 @@ run = "docker compose logs -f"
 [tasks.tidy]
 description = "Tidy go.mod / go.sum"
 run = "go mod tidy"
+
+[tasks.lint]
+description = "Run golangci-lint (the Go credo)"
+run = "golangci-lint run"
+
+[tasks.test]
+description = "Run all tests (-race; includes dockertest integration)"
+run = "go test ./... -race"
+
+[tasks."test:short"]
+description = "Run unit tests only (-short skips dockertest)"
+run = "go test ./... -race -short"
+
+[tasks.check]
+description = "Pre-push gate: lint + short tests"
+depends = ["lint", "test:short"]

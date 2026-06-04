@@ -8,8 +8,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 
-	"github.com/dali/go_project_sample/internal/domain"
-	"github.com/dali/go_project_sample/internal/usecase"
+	"github.com/dali/go_clean_arch_sample/internal/domain"
+	"github.com/dali/go_clean_arch_sample/internal/usecase"
 )
 
 // pgUniqueViolation is the SQLSTATE code Postgres returns for a unique-index
@@ -27,7 +27,9 @@ func NewUserRepository(db *gorm.DB) *UserRepository {
 
 func (r *UserRepository) List(ctx context.Context) ([]domain.User, error) {
 	var models []userModel
-	if err := r.db.WithContext(ctx).Find(&models).Error; err != nil {
+	// Order explicitly so the list contract is deterministic; without it
+	// Postgres returns rows in an undefined order.
+	if err := r.db.WithContext(ctx).Order("created_at").Find(&models).Error; err != nil {
 		return nil, err
 	}
 	users := make([]domain.User, len(models))

@@ -6,8 +6,8 @@ import (
 
 	"github.com/go-gormigrate/gormigrate/v2"
 
-	"github.com/dali/go_project_sample/internal/adapter/repository/postgres/migrations"
-	"github.com/dali/go_project_sample/internal/config"
+	"github.com/dali/go_clean_arch_sample/internal/adapter/repository/postgres/migrations"
+	"github.com/dali/go_clean_arch_sample/internal/config"
 )
 
 // Migrate applies any pending migrations to cfg.DBName. Idempotent — already-
