@@ -9,17 +9,13 @@ import (
 	"log"
 	"os"
 	"testing"
-	"time"
 
-	"github.com/hibiken/asynq"
-	"github.com/ory/dockertest/v3"
-	"github.com/ory/dockertest/v3/docker"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 
 	"github.com/dali/go_clean_arch_sample/internal/adapter/repository/postgres"
 	"github.com/dali/go_clean_arch_sample/internal/config"
-	"github.com/dali/go_clean_arch_sample/internal/queue"
+	"github.com/dali/go_clean_arch_sample/internal/testsupport"
 )
 
 // testCfg is the shared harness: a config pointed at throwaway Postgres +
@@ -32,114 +28,32 @@ func TestMain(m *testing.M) {
 	testing.Init()
 	flag.Parse()
 
-	if testing.Short() {
-		os.Exit(m.Run())
-	}
-
-	pool := newPool()
+	// Skips under -short; fatal if Docker is required but unreachable.
+	pool := testsupport.RequirePool()
 	if pool == nil {
-		log.Printf("docker daemon unreachable — skipping integration tests")
-		os.Exit(m.Run())
+		os.Exit(m.Run()) // -short: integration tests self-skip via reset(t)
 	}
 
-	pg, err := pool.RunWithOptions(&dockertest.RunOptions{
-		Repository: "postgres",
-		Tag:        "16-alpine",
-		Env: []string{
-			"POSTGRES_USER=test",
-			"POSTGRES_PASSWORD=test",
-			"POSTGRES_DB=test",
-			"listen_addresses='*'",
-		},
-	}, autoRemove)
+	cfg := testsupport.BaseConfig()
+	pg, err := testsupport.StartPostgres(pool, cfg)
 	if err != nil {
 		log.Fatalf("could not start postgres container: %v", err)
 	}
-
-	rd, err := pool.RunWithOptions(&dockertest.RunOptions{
-		Repository: "redis",
-		Tag:        "7-alpine",
-	}, autoRemove)
+	rd, err := testsupport.StartRedis(pool, cfg)
 	if err != nil {
-		purge(pool, pg)
+		testsupport.Purge(pool, pg)
 		log.Fatalf("could not start redis container: %v", err)
 	}
 
-	cfg := &config.Config{
-		Env:               config.EnvTest,
-		DBHost:            "localhost",
-		DBPort:            pg.GetPort("5432/tcp"),
-		DBUser:            "test",
-		DBPassword:        "test",
-		DBName:            "test",
-		DBSSLMode:         "disable",
-		DBMaxOpenConns:    5,
-		DBMaxIdleConns:    1,
-		DBConnMaxLifetime: time.Minute,
-		RedisAddr:         "localhost:" + rd.GetPort("6379/tcp"),
-		LogFormat:         "json",
-		LogLevel:          "warn",
-	}
-
-	pool.MaxWait = 60 * time.Second
-	if err := pool.Retry(func() error {
-		db, err := postgres.New(cfg)
-		if err != nil {
-			return err
-		}
-		sqlDB, err := db.DB()
-		if err != nil {
-			return err
-		}
-		return sqlDB.Ping()
-	}); err != nil {
-		purge(pool, pg, rd)
-		log.Fatalf("postgres never became ready: %v", err)
-	}
-	if err := pool.Retry(func() error {
-		c := asynq.NewClient(queue.RedisOpt(cfg))
-		defer func() { _ = c.Close() }()
-		return c.Ping()
-	}); err != nil {
-		purge(pool, pg, rd)
-		log.Fatalf("redis never became ready: %v", err)
-	}
-
 	if err := postgres.Migrate(cfg); err != nil {
-		purge(pool, pg, rd)
+		testsupport.Purge(pool, pg, rd)
 		log.Fatalf("apply migrations: %v", err)
 	}
 	testCfg = cfg
 
 	code := m.Run()
-	purge(pool, pg, rd)
+	testsupport.Purge(pool, pg, rd)
 	os.Exit(code)
-}
-
-// newPool connects to the local Docker daemon, trying DOCKER_HOST, the macOS
-// Docker Desktop default, then dockertest auto-discovery (which finds
-// /var/run/docker.sock on Linux / CI). Returns nil when unreachable.
-func newPool() *dockertest.Pool {
-	endpoints := []string{os.Getenv("DOCKER_HOST"), "unix://" + os.Getenv("HOME") + "/.docker/run/docker.sock", ""}
-	for _, ep := range endpoints {
-		p, err := dockertest.NewPool(ep)
-		if err == nil && p.Client.Ping() == nil {
-			return p
-		}
-	}
-	return nil
-}
-
-// autoRemove tells Docker to reap the container when it stops.
-func autoRemove(hc *docker.HostConfig) {
-	hc.AutoRemove = true
-	hc.RestartPolicy = docker.RestartPolicy{Name: "no"}
-}
-
-func purge(pool *dockertest.Pool, resources ...*dockertest.Resource) {
-	for _, r := range resources {
-		_ = pool.Purge(r)
-	}
 }
 
 // requireIntegration skips a test when no live infra is available.

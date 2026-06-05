@@ -10,13 +10,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/ory/dockertest/v3"
-	"github.com/ory/dockertest/v3/docker"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/dali/go_clean_arch_sample/internal/config"
 	"github.com/dali/go_clean_arch_sample/internal/domain"
+	"github.com/dali/go_clean_arch_sample/internal/testsupport"
 	"github.com/dali/go_clean_arch_sample/internal/usecase"
 )
 
@@ -30,85 +29,26 @@ func TestMain(m *testing.M) {
 	testing.Init()
 	flag.Parse()
 
-	if testing.Short() {
-		// `go test -short` skips integration; in that mode we don't even
-		// try to reach Docker, so unit-only runs stay fast.
-		os.Exit(m.Run())
+	// Skips under -short; fatal if Docker is required but unreachable.
+	pool := testsupport.RequirePool()
+	if pool == nil {
+		os.Exit(m.Run()) // -short: run the unit slices, skip integration
 	}
 
-	// Try DOCKER_HOST first, then the macOS Docker Desktop default. Falls
-	// back to dockertest's auto-discovery (which finds /var/run/docker.sock
-	// on Linux / CI).
-	endpoints := []string{os.Getenv("DOCKER_HOST"), "unix://" + os.Getenv("HOME") + "/.docker/run/docker.sock", ""}
-	var pool *dockertest.Pool
-	var perr error
-	for _, ep := range endpoints {
-		pool, perr = dockertest.NewPool(ep)
-		if perr == nil && pool.Client.Ping() == nil {
-			break
-		}
-	}
-	if pool == nil || pool.Client.Ping() != nil {
-		log.Printf("docker daemon unreachable — skipping postgres integration tests")
-		os.Exit(m.Run())
-	}
-
-	res, err := pool.RunWithOptions(&dockertest.RunOptions{
-		Repository: "postgres",
-		Tag:        "16-alpine",
-		Env: []string{
-			"POSTGRES_USER=test",
-			"POSTGRES_PASSWORD=test",
-			"POSTGRES_DB=test",
-			"listen_addresses='*'",
-		},
-	}, func(hc *docker.HostConfig) {
-		hc.AutoRemove = true
-		hc.RestartPolicy = docker.RestartPolicy{Name: "no"}
-	})
+	cfg := testsupport.BaseConfig()
+	pg, err := testsupport.StartPostgres(pool, cfg)
 	if err != nil {
 		log.Fatalf("could not start postgres container: %v", err)
 	}
 
-	cfg := &config.Config{
-		Env:               config.EnvTest,
-		DBHost:            "localhost",
-		DBPort:            res.GetPort("5432/tcp"),
-		DBUser:            "test",
-		DBPassword:        "test",
-		DBName:            "test",
-		DBSSLMode:         "disable",
-		DBMaxOpenConns:    5,
-		DBMaxIdleConns:    1,
-		DBConnMaxLifetime: time.Minute,
-		LogFormat:         "json",
-		LogLevel:          "warn",
-	}
-
-	pool.MaxWait = 60 * time.Second
-	if err := pool.Retry(func() error {
-		db, err := New(cfg)
-		if err != nil {
-			return err
-		}
-		sqlDB, err := db.DB()
-		if err != nil {
-			return err
-		}
-		return sqlDB.Ping()
-	}); err != nil {
-		_ = pool.Purge(res)
-		log.Fatalf("postgres never became ready: %v", err)
-	}
-
 	if err := Migrate(cfg); err != nil {
-		_ = pool.Purge(res)
+		testsupport.Purge(pool, pg)
 		log.Fatalf("apply migrations: %v", err)
 	}
 	testCfg = cfg
 
 	code := m.Run()
-	_ = pool.Purge(res)
+	testsupport.Purge(pool, pg)
 	os.Exit(code)
 }
 
