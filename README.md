@@ -1,16 +1,16 @@
 # go_clean_arch_sample
 
-A small, deliberately-scoped Go service that shows how I structure a real
+A small, deliberately-scoped Go service demonstrating a production-shaped
 backend: clean architecture with dependencies pointing inward, a Gin HTTP API,
 an embedded [asynq](https://github.com/hibiken/asynq) (Redis) worker, Postgres
 via GORM, and a two-tier test strategy (fakes for units, real containers for
 integration).
 
-It implements one feature — user create / get / list, with a welcome-email
-task enqueued on creation — and stops there on purpose. The point is the
-**shape and the judgment calls**, not the feature count.
+It implements a single feature — user create / get / list, with a welcome-email
+task enqueued on creation — and stops there on purpose, so the focus stays on
+the **structure and the design decisions** rather than feature count.
 
-## What it's meant to demonstrate
+## What it demonstrates
 
 - **Dependencies point inward.** `domain` → `usecase` → `adapter` → `cmd`. The
   inner layers never import the outer ones.
@@ -50,7 +50,7 @@ test/
   integration/         full-stack tests (real HTTP → Postgres → Redis)
 ```
 
-## Key decisions (the interview conversation)
+## Design decisions
 
 - **The worker is embedded in the API process — there is no standalone worker
   binary.** This service never consumes tasks without also producing them, so a
@@ -82,12 +82,14 @@ Prereqs: [mise](https://mise.jdx.dev) (pins Go 1.25 + tooling) and Docker.
 cp .env.example .env        # or use the committed .env (APP_ENV=dev, HTTP_PORT=8081)
 mise install                # Go toolchain + golangci-lint + delve
 mise run infra              # Postgres + Redis via docker compose
-mise run cli -- migrate     # apply migrations
+mise run cli -- db_setup    # create DB + migrate + seed demo data
 mise run server             # API + embedded worker on :8081
 ```
 
-`mise run infra:dev` also brings up the asynqmon queue UI on
-<http://localhost:8082>.
+`db_setup` is the first-run convenience (create DB → migrate → seed), the
+`rails db:setup` analog. On later runs you usually just need `mise run cli --
+migrate` to apply new migrations. `mise run infra:dev` also brings up the
+asynqmon queue UI on <http://localhost:8082>.
 
 ### Try the API
 
@@ -117,6 +119,38 @@ curl -s localhost:8081/users/<id>
 # invalid body   -> 400 {"success":false,"error":"invalid_body","details":[…]}
 ```
 
+## Operator CLI (`cmd/cli`)
+
+A cobra CLI that wraps the same use-case functions the HTTP layer calls. It's
+the Go stand-in for `rails console` / `iex --remsh`: Go can't attach a REPL to
+a running process, so operational actions are anticipated and shipped as
+subcommands. Run it via `mise run cli -- <command>` (dev), or `./bin/cli
+<command>` from a built binary on a host.
+
+**Always available** (safe in every environment):
+
+| Command | Description |
+|---|---|
+| `migrate` | Apply pending migrations. Idempotent and additive — this is the prod deploy step. |
+| `migrate_status` | Print each migration as `APPLIED` / `PENDING` / `ORPHAN`. Read-only. |
+
+**Dev-only** (gated on `APP_ENV=dev`; they don't even appear in `--help`
+elsewhere, because destructive ops, local bring-up, and source scaffolding must
+never be reachable in prod/test):
+
+| Command | Description |
+|---|---|
+| `db_setup` | Create database → migrate → seed. The `rails db:setup` analog; idempotent. |
+| `db_reset` | Drop database → `db_setup`. Destructive. |
+| `seed [name]` | Run all seeders, or one by name. `--list` to list them, `--reset` to truncate first. Idempotent (each seeder skips its own duplicates). |
+| `generate_migration <name>` | Scaffold `migrations/<timestamp>_<name>.go` with `Migrate`/`Rollback` stubs that fail loudly until you implement them. Name must be lowercase snake_case. |
+
+Migrations live one-per-file under
+`internal/adapter/repository/postgres/migrations`; each registers itself in an
+`init()`, so there's no central manifest — the timestamp-prefixed filename is
+the ordering. Seeders follow the same self-registering pattern under
+`internal/seeds` and write *through* the use-case layer, never raw SQL.
+
 ## Testing
 
 ```bash
@@ -133,6 +167,75 @@ Bypass Go's test cache with `-count=1`, e.g.
 - **Integration** (`test/integration`, plus the postgres repo test): real
   ephemeral Postgres + Redis containers (random ports, auto-removed) — fully
   separate from the dev compose instance.
+
+## Starting from this as a template
+
+The `user` feature is the worked example of the architecture — once you've read
+how it's wired, you can delete it and build your own features in the same shape.
+
+To stamp out a brand-new module with its own import path (the Go-native
+`create-react-app`), use [`gonew`](https://pkg.go.dev/golang.org/x/tools/cmd/gonew):
+
+```bash
+go install golang.org/x/tools/cmd/gonew@latest
+gonew github.com/dali/go_clean_arch_sample@latest github.com/you/myapp ./myapp
+```
+
+That copies the tree and rewrites the module path in `go.mod` and every import.
+A few non-import references (`.env` `DB_NAME`, the CLI `Short:` string, this
+README's title) still mention the old name — find-and-replace those by hand.
+
+### Removing the example `user` feature
+
+Delete the user-specific files:
+
+```bash
+rm internal/domain/user.go internal/domain/user_test.go
+rm internal/usecase/user.go internal/usecase/user_test.go
+rm internal/usecase/testfakes/testfakes.go
+rm internal/adapter/http/handler/users.go internal/adapter/http/handler/users_test.go
+rm internal/adapter/http/router/users.go
+rm internal/adapter/repository/postgres/user_repository.go
+rm internal/adapter/repository/postgres/user_model.go
+rm internal/adapter/repository/postgres/user_repository_test.go
+rm internal/queue/welcome_email.go
+rm internal/seeds/users.go
+rm internal/adapter/repository/postgres/migrations/*_create_users.go
+rm test/integration/create_user_test.go
+```
+
+Then drop the references to them — each is a one-line edit:
+
+| File | Edit |
+|---|---|
+| `internal/adapter/http/router/router.go` | remove the `RegisterUsers(engine, deps)` line |
+| `internal/usecase/repositories.go` | empty the `Repositories` struct (drop `Users`) |
+| `internal/usecase/producers.go` | empty the `Producers` struct (drop `WelcomeEmail`) |
+| `internal/adapter/repository/postgres/repositories.go` | drop `Users: NewUserRepository(db)` |
+| `internal/queue/client.go` | drop `WelcomeEmail: c` in `NewProducers` |
+| `internal/queue/server.go` | remove the `mux.HandleFunc(TypeWelcomeEmail, …)` line |
+
+`Repositories` and `Producers` are deliberately just aggregates, so leaving them
+empty is fine — they grow one field per entity/producer as you add features.
+
+Verify you're back to a clean slate:
+
+```bash
+go build ./...
+mise run check          # lint + short tests
+```
+
+Now scaffold your first feature. Generate a migration, then mirror how `user`
+was wired — a domain entity, its use case + the interface(s) it needs, a
+postgres repository, an HTTP handler, and a `router/<feature>.go` that mounts
+it:
+
+```bash
+mise run cli -- generate_migration create_widgets
+```
+
+(gormigrate needs at least one migration, so add yours before running
+`db_setup` / `migrate`.)
 
 ## Stack
 
